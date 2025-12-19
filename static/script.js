@@ -19,12 +19,25 @@ const COLORS = {
  * Fetch data from the API and render the chart
  */
 async function init() {
+    let data;
     try {
-        const response = await fetch('/api/data');
-        if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status}`);
+        // Try fetching from API first (local dev)
+        try {
+            const response = await fetch('/api/data');
+            if (response.ok) {
+                data = await response.json();
+            } else {
+                throw new Error('API not available');
+            }
+        } catch (apiError) {
+            // Fallback to static data (GitHub Pages)
+            console.log('API not available, falling back to static data');
+            const response = await fetch('data.json');
+            if (!response.ok) {
+                throw new Error(`Static data not found: ${response.status}`);
+            }
+            data = await response.json();
         }
-        const data = await response.json();
 
         // Hide loading indicator
         document.getElementById('loading').classList.add('hidden');
