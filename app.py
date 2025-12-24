@@ -134,7 +134,6 @@ def process_data() -> dict[str, Any]:
     df = fetch_eci_data()
 
     # Classify models as open or closed
-    df["Open"] = df["Model accessibility"].str.contains("Open", na=False)
 
     # Get rankings for each group
     df_open = df[df["Open"]].copy()
@@ -152,7 +151,7 @@ def process_data() -> dict[str, Any]:
     for _, row in df_frontier.iterrows():
         models.append({
             "model": row.get("Model", row.get("model version", "Unknown")),
-            "display_name": row.get("Display name", row.get("Model", "Unknown")),
+            "display_name": row.get("Model", row.get("Model", "Unknown")),
             "eci": float(row["eci"]) if pd.notna(row["eci"]) else None,
             "eci_std": float(row["eci_std"]) if pd.notna(row.get("eci_std")) else None,
             "date": row["date"].isoformat() if pd.notna(row["date"]) else None,
@@ -274,7 +273,7 @@ def calculate_trends(df: pd.DataFrame) -> dict:
     """
     trends = {}
     
-    cutoff = pd.Timestamp("2024-03-01")
+    cutoff = pd.Timestamp("2024-04-01")
     
     def get_stats(sub_df, name):
         if len(sub_df) < 2:
@@ -337,11 +336,11 @@ def calculate_trends(df: pd.DataFrame) -> dict:
 
     # Pre-2024
     pre_2024 = df[df["date"] < cutoff]
-    trends["pre_mar_2024"] = get_stats(pre_2024, "Pre-Mar 2024")
+    trends["pre_apr_2024"] = get_stats(pre_2024, "Pre-Apr 2024")
     
     # Post-2024
     post_2024 = df[df["date"] >= cutoff]
-    trends["post_mar_2024"] = get_stats(post_2024, "Post-Mar 2024")
+    trends["post_apr_2024"] = get_stats(post_2024, "Post-Apr 2024")
     
     return trends
 

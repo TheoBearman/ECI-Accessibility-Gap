@@ -80,7 +80,7 @@ function renderTrendChart(data) {
     });
 
     // Trend Lines and Stats
-    ['pre_mar_2024', 'post_mar_2024'].forEach((key, index) => {
+    ['pre_apr_2024', 'post_apr_2024'].forEach((key, index) => {
         const trend = trends[key];
         if (trend) {
             // Line trace
@@ -92,25 +92,25 @@ function renderTrendChart(data) {
                 name: `${trend.name}`,
                 line: {
                     width: 4,
-                    dash: key === 'post_mar_2024' ? 'solid' : 'dot',
-                    color: key === 'post_mar_2024' ? COLORS.open : COLORS.annotation
+                    dash: key === 'post_apr_2024' ? 'solid' : 'dot',
+                    color: key === 'post_apr_2024' ? COLORS.open : COLORS.annotation
                 }
             });
 
             // Stats Annotation
             // Position: Pre-2025 near end of line, Post-2025 near start/middle
-            const isPre = key === 'pre_mar_2024';
+            const isPre = key === 'pre_apr_2024';
             const xPos = isPre ? trend.end_point.date : trend.start_point.date;
             const yPos = isPre ? trend.end_point.eci : trend.start_point.eci;
 
-            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI/year<br>${trend.percentage_growth_annualized}% per year`;
+            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI points/year<br>${trend.percentage_growth_annualized}% per year`;
 
-            if (!isPre && trends['pre_mar_2024'] && trends['post_mar_2024']) {
-                const preRate = trends['pre_mar_2024'].absolute_growth_per_year;
-                const postRate = trends['post_mar_2024'].absolute_growth_per_year;
+            if (!isPre && trends['pre_apr_2024'] && trends['post_apr_2024']) {
+                const preRate = trends['pre_apr_2024'].absolute_growth_per_year;
+                const postRate = trends['post_apr_2024'].absolute_growth_per_year;
                 if (preRate > 0) {
                     const factor = (postRate / preRate).toFixed(1);
-                    statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI/year<br>${factor}x faster than Pre-Mar 2024`;
+                    statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI points/year<br>${factor}x faster than Pre-Apr 2024`;
                 }
             }
 
@@ -143,7 +143,7 @@ function renderTrendChart(data) {
 
     // Collect annotations
     const annotations = [];
-    ['pre_mar_2024', 'post_mar_2024'].forEach(key => {
+    ['pre_apr_2024', 'post_apr_2024'].forEach(key => {
         if (trends[key] && trends[key].annotation) {
             annotations.push(trends[key].annotation);
         }
