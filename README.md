@@ -59,4 +59,9 @@ This project is configured to deploy automatically to GitHub Pages.
 
 Data is sourced from [Epoch AI](https://epoch.ai).
 
-> Epoch AI’s data is free to use, distribute, and reproduce provided the source and authors are credited under the Creative Commons Attribution license.
+62: > Epoch AI’s data is free to use, distribute, and reproduce provided the source and authors are credited under the Creative Commons Attribution license.
+63: 
+64: **Attribution:**
+65: Data is provided by [Epoch AI](https://epoch.ai) and is licensed under the [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
+66: 
+67: If you use this data or visualization, please credit Epoch AI as the source.
