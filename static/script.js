@@ -575,12 +575,13 @@ function updateTitle(avgGap) {
  */
 function updateLastUpdated(timestamp) {
     const date = new Date(timestamp);
-    const formatted = date.toLocaleDateString('en-US', {
+    const formatted = date.toLocaleString(undefined, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
+        timeZoneName: 'short'
     });
     document.getElementById('last-updated').textContent = formatted;
 }
