@@ -30,12 +30,14 @@ async function init() {
         document.getElementById('loading').classList.add('hidden');
 
         // Render chart and update UI
-        renderChart(data);
-        renderTrendChart(data);
-        updateStats(data.statistics);
-        updateTitle(data.statistics.avg_horizontal_gap_months);
-        updateLastUpdated(data.last_updated);
-        renderTable(data.models);
+        if (data) {
+            renderChart(data);
+            renderTrendChart(data);
+            updateStats(data.statistics);
+            updateTitle(data.statistics.avg_horizontal_gap_months);
+            updateLastUpdated(data.last_updated);
+            renderTable(data.trend_models || data.models); // Use all models for table
+        }
 
     } catch (error) {
         console.error('Failed to load data:', error);
