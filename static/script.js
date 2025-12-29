@@ -163,6 +163,25 @@ function renderTrendChart(data) {
         }
     });
 
+    // Add "current date" vertical line logic
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const quarter = Math.ceil((now.getMonth() + 1) / 3);
+    const quarterLabel = `Q${quarter} ${now.getFullYear()}`;
+
+    annotations.push({
+        x: today,
+        y: 1,
+        yref: 'paper',
+        text: quarterLabel,
+        showarrow: false,
+        font: {
+            size: 11,
+            color: COLORS.annotation,
+        },
+        yshift: 10,
+    });
+
     const layout = {
         title: { text: '', font: { size: 16 } },
         margin: { l: 60, r: 60, t: 40, b: 60 },
@@ -220,6 +239,19 @@ function renderTrendChart(data) {
                     width: 1,
                     dash: 'dot'
                 }
+            },
+            {
+                type: 'line',
+                x0: today,
+                x1: today,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: COLORS.gridline,
+                    width: 1,
+                    dash: 'dash',
+                },
             }
         ],
         hovermode: 'closest',
