@@ -117,7 +117,7 @@ function renderTrendChart(data) {
             const xPos = isPre ? trend.end_point.date : trend.start_point.date;
             const yPos = isPre ? trend.end_point.eci : trend.start_point.eci;
 
-            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI points/year<br>${trend.percentage_growth_annualized}% per year`;
+            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI points/year`;
 
             if (!isPre && trends['pre_apr_2024'] && trends['post_apr_2024']) {
                 const preRate = trends['pre_apr_2024'].absolute_growth_per_year;
