@@ -1630,7 +1630,7 @@
       "open_model": null,
       "open_date": null,
       "open_eci": null,
-      "gap_months": 7.1,
+      "gap_months": 7.2,
       "matched": false
     },
     {
@@ -1640,7 +1640,7 @@
       "open_model": null,
       "open_date": null,
       "open_eci": null,
-      "gap_months": 5.2,
+      "gap_months": 5.3,
       "matched": false
     },
     {
@@ -1650,7 +1650,7 @@
       "open_model": null,
       "open_date": null,
       "open_eci": null,
-      "gap_months": 3.2,
+      "gap_months": 3.3,
       "matched": false
     },
     {
@@ -1705,5 +1705,5 @@
       }
     }
   },
-  "last_updated": "2026-01-14T01:10:13.908763"
+  "last_updated": "2026-01-15T01:06:05.016136"
 }
