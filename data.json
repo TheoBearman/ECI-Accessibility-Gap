@@ -1665,7 +1665,7 @@
     }
   ],
   "statistics": {
-    "avg_horizontal_gap_months": 4.6,
+    "avg_horizontal_gap_months": 4.7,
     "std_horizontal_gap": 2.5,
     "ci_90_low": 1.1,
     "ci_90_high": 9.0,
@@ -1705,5 +1705,5 @@
       }
     }
   },
-  "last_updated": "2026-01-15T01:06:05.016136"
+  "last_updated": "2026-01-16T01:08:10.211176"
 }
