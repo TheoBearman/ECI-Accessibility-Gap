@@ -1660,7 +1660,7 @@
       "open_model": null,
       "open_date": null,
       "open_eci": null,
-      "gap_months": 2.0,
+      "gap_months": 2.1,
       "matched": false
     }
   ],
@@ -1705,5 +1705,5 @@
       }
     }
   },
-  "last_updated": "2026-01-19T01:12:10.907422"
+  "last_updated": "2026-01-20T01:07:25.934291"
 }
