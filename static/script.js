@@ -700,7 +700,7 @@ function renderChart(data) {
     if (matchedGaps.length > 0) {
         traces.push({
             x: matchedGaps.map(g => g.open_date),
-            y: matchedGaps.map(g => g.open_eci),
+            y: matchedGaps.map(g => g.closed_eci),  // Position at closed model's ECI to align with connector line
             mode: 'markers',
             type: 'scatter',
             name: labels.openModel,
@@ -710,7 +710,7 @@ function renderChart(data) {
                 symbol: 'square',
             },
             hovertemplate: matchedGaps.map(g =>
-                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)}<br>Date: %{x}<extra></extra>`
+                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} (matched ${g.closed_eci.toFixed(1)})<br>Date: %{x}<extra></extra>`
             ),
         });
     }
