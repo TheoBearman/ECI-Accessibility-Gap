@@ -537,6 +537,23 @@ function renderChart(data) {
     );
 
     if (unmatchedClosed.length > 0) {
+        // Calculate expected catch-up dates for hover text
+        const ciLowMs = (statistics?.ci_90_low || 0) * 30.5 * 24 * 60 * 60 * 1000;
+        const ciHighMs = (statistics?.ci_90_high || 0) * 30.5 * 24 * 60 * 60 * 1000;
+        const hasCIData = statistics?.ci_90_low !== undefined && statistics?.ci_90_high !== undefined;
+
+        const hoverTexts = unmatchedClosed.map(m => {
+            const name = m.display_name || m.model;
+            if (!hasCIData) {
+                return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
+            }
+            const releaseDate = new Date(m.date).getTime();
+            const expectedLow = new Date(releaseDate + ciLowMs);
+            const expectedHigh = new Date(releaseDate + ciHighMs);
+            const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+            return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
+        });
+
         traces.push({
             x: unmatchedClosed.map(m => m.date),
             y: unmatchedClosed.map(m => m.eci),
@@ -549,47 +566,9 @@ function renderChart(data) {
                 symbol: 'circle-open',
                 line: { width: 2 },
             },
-            hovertemplate: '<b>%{text}</b><br>ECI: %{y:.1f}<br>Date: %{x}<br><i>Not yet matched</i><extra></extra>',
+            hovertemplate: hoverTexts.map(t => t + '<extra></extra>'),
             text: unmatchedClosed.map(m => m.display_name || m.model),
         });
-
-        // Add projected catch-up zones for unmatched models based on 90% CI
-        if (statistics && statistics.ci_90_low !== undefined && statistics.ci_90_high !== undefined) {
-            const ciLowMs = statistics.ci_90_low * 30.5 * 24 * 60 * 60 * 1000; // months to ms
-            const ciHighMs = statistics.ci_90_high * 30.5 * 24 * 60 * 60 * 1000;
-
-            unmatchedClosed.forEach(m => {
-                const releaseDate = new Date(m.date).getTime();
-                const expectedLow = new Date(releaseDate + ciLowMs).toISOString();
-                const expectedHigh = new Date(releaseDate + ciHighMs).toISOString();
-
-                // Add shaded rectangle showing expected catch-up window
-                shapes.push({
-                    type: 'rect',
-                    x0: expectedLow,
-                    x1: expectedHigh,
-                    y0: m.eci - 1.5,
-                    y1: m.eci + 1.5,
-                    fillcolor: 'rgba(92, 107, 192, 0.15)',
-                    line: { color: 'rgba(92, 107, 192, 0.4)', width: 1, dash: 'dot' },
-                });
-            });
-
-            // Add a single trace for the legend entry
-            traces.push({
-                x: [null],
-                y: [null],
-                mode: 'markers',
-                type: 'scatter',
-                name: `Expected catch-up (90% CI)`,
-                marker: {
-                    color: 'rgba(92, 107, 192, 0.3)',
-                    size: 15,
-                    symbol: 'square',
-                },
-                showlegend: true,
-            });
-        }
     }
 
     // Only show open models that matched a closed model (blue squares)
