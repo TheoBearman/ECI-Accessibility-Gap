@@ -783,6 +783,24 @@ function renderHistoricalChart(data) {
     const annotations = [];
     const isCurrentGapMode = appState.gapMetric === 'current';
 
+    // Add 90% CI band FIRST (so it renders behind other elements)
+    const startDate = historicalGaps[0]?.date;
+    const endDate = historicalGaps[historicalGaps.length - 1]?.date;
+
+    if (stats.ci_90_low !== undefined && stats.ci_90_high !== undefined && startDate && endDate) {
+        traces.push({
+            x: [startDate, endDate, endDate, startDate],
+            y: [stats.ci_90_low, stats.ci_90_low, stats.ci_90_high, stats.ci_90_high],
+            fill: 'toself',
+            fillcolor: 'rgba(92, 107, 192, 0.2)',
+            line: { color: 'rgba(92, 107, 192, 0.5)', width: 1, dash: 'dot' },
+            type: 'scatter',
+            name: `90% CI (${stats.ci_90_low} - ${stats.ci_90_high} mo)`,
+            hoverinfo: 'skip',
+            showlegend: true,
+        });
+    }
+
     // Main gap line
     traces.push({
         x: historicalGaps.map(g => g.date),
@@ -851,24 +869,6 @@ function renderHistoricalChart(data) {
             bordercolor: COLORS.closed,
             borderwidth: 1,
             font: { size: 11, color: COLORS.closed },
-        });
-    }
-
-    // Add 90% CI band (shown in both modes)
-    const startDate = historicalGaps[0]?.date;
-    const endDate = historicalGaps[historicalGaps.length - 1]?.date;
-
-    if (stats.ci_90_low !== undefined && stats.ci_90_high !== undefined && startDate && endDate) {
-        traces.push({
-            x: [startDate, endDate, endDate, startDate],
-            y: [stats.ci_90_low, stats.ci_90_low, stats.ci_90_high, stats.ci_90_high],
-            fill: 'toself',
-            fillcolor: 'rgba(107, 114, 128, 0.2)',
-            line: { color: 'rgba(107, 114, 128, 0.4)', width: 1 },
-            type: 'scatter',
-            name: `90% CI (${stats.ci_90_low} - ${stats.ci_90_high} mo)`,
-            hoverinfo: 'skip',
-            showlegend: true,
         });
     }
 
