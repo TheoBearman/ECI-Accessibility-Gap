@@ -96,19 +96,52 @@ function setupToggleHandlers() {
 }
 
 /**
+ * Get labels based on current framing
+ */
+function getFramingLabels() {
+    if (appState.framing === 'china') {
+        return {
+            open: 'Chinese',
+            closed: 'US',
+            openModel: 'Chinese model',
+            closedModel: 'US model',
+            unmatched: 'US model not yet matched by Chinese models',
+            connector: 'First Chinese model to match ECI',
+        };
+    } else {
+        return {
+            open: 'open',
+            closed: 'closed-source',
+            openModel: 'Open model',
+            closedModel: 'Closed model',
+            unmatched: 'Closed model not yet matched by open models',
+            connector: 'First open model to match ECI',
+        };
+    }
+}
+
+/**
  * Update the framing labels in the title and legend
  */
 function updateFramingLabels() {
+    const labels = getFramingLabels();
+
+    // Update title
     const openLabel = document.getElementById('category-open');
     const closedLabel = document.getElementById('category-closed');
+    if (openLabel) openLabel.textContent = labels.open;
+    if (closedLabel) closedLabel.textContent = labels.closed;
 
-    if (appState.framing === 'china') {
-        openLabel.textContent = 'China';
-        closedLabel.textContent = 'US';
-    } else {
-        openLabel.textContent = 'open';
-        closedLabel.textContent = 'closed-source';
-    }
+    // Update legend
+    const legendClosed = document.getElementById('legend-closed');
+    const legendUnmatched = document.getElementById('legend-unmatched');
+    const legendOpen = document.getElementById('legend-open');
+    const legendConnector = document.getElementById('legend-connector');
+
+    if (legendClosed) legendClosed.textContent = labels.closedModel;
+    if (legendUnmatched) legendUnmatched.textContent = labels.unmatched;
+    if (legendOpen) legendOpen.textContent = labels.openModel;
+    if (legendConnector) legendConnector.textContent = labels.connector;
 }
 
 /**
@@ -201,6 +234,7 @@ function hideExplainer() {
 function renderAll() {
     const currentData = getCurrentData();
 
+    updateFramingLabels();
     renderChart(currentData);
     renderTrendChart(currentData);
     renderHistoricalChart(currentData);
@@ -465,6 +499,7 @@ function renderTrendChart(data) {
  */
 function renderChart(data) {
     const { models, gaps } = data;
+    const labels = getFramingLabels();
 
     // Create traces
     const traces = [];
@@ -485,7 +520,7 @@ function renderChart(data) {
             y: matchedClosed.map(m => m.eci),
             mode: 'markers',
             type: 'scatter',
-            name: 'Closed model',
+            name: labels.closedModel,
             marker: {
                 color: COLORS.closed,
                 size: 12,
@@ -507,7 +542,7 @@ function renderChart(data) {
             y: unmatchedClosed.map(m => m.eci),
             mode: 'markers',
             type: 'scatter',
-            name: 'Closed (unmatched)',
+            name: `${labels.closedModel} (unmatched)`,
             marker: {
                 color: COLORS.closedUnmatched,
                 size: 12,
@@ -529,7 +564,7 @@ function renderChart(data) {
             y: matchedGaps.map(g => g.closed_eci),
             mode: 'markers',
             type: 'scatter',
-            name: 'Open model',
+            name: labels.openModel,
             marker: {
                 color: COLORS.open,
                 size: 10,
@@ -735,6 +770,7 @@ function renderChart(data) {
  */
 function renderHistoricalChart(data) {
     const historicalGaps = data.historical_gaps || [];
+    const labels = getFramingLabels();
 
     if (historicalGaps.length === 0) {
         document.getElementById('historical-chart').innerHTML =
@@ -758,8 +794,8 @@ function renderHistoricalChart(data) {
         marker: { color: COLORS.open, size: 6 },
         hovertemplate: historicalGaps.map(g =>
             `<b>%{x|%b %Y}</b><br>Gap: ${g.gap_months} mo<br>` +
-            `Open frontier: ${g.open_frontier_model || 'N/A'}<br>` +
-            `Closed frontier: ${g.reference_model || 'N/A'}<extra></extra>`
+            `${labels.openModel} frontier: ${g.open_frontier_model || 'N/A'}<br>` +
+            `${labels.closedModel} frontier: ${g.reference_model || 'N/A'}<extra></extra>`
         ),
     });
 
@@ -818,10 +854,29 @@ function renderHistoricalChart(data) {
         });
     }
 
-    // Add average gap reference line in average mode
+    // Add average gap reference line and 90% CI band in average mode
     if (!isCurrentGapMode && stats.avg_horizontal_gap_months) {
+        const startDate = historicalGaps[0]?.date;
+        const endDate = historicalGaps[historicalGaps.length - 1]?.date;
+
+        // 90% CI shaded band
+        if (stats.ci_90_low !== undefined && stats.ci_90_high !== undefined) {
+            traces.push({
+                x: [startDate, endDate, endDate, startDate],
+                y: [stats.ci_90_low, stats.ci_90_low, stats.ci_90_high, stats.ci_90_high],
+                fill: 'toself',
+                fillcolor: 'rgba(107, 114, 128, 0.15)',
+                line: { color: 'transparent' },
+                type: 'scatter',
+                name: `90% CI (${stats.ci_90_low} - ${stats.ci_90_high} mo)`,
+                hoverinfo: 'skip',
+                showlegend: true,
+            });
+        }
+
+        // Average line
         traces.push({
-            x: [historicalGaps[0]?.date, historicalGaps[historicalGaps.length - 1]?.date],
+            x: [startDate, endDate],
             y: [stats.avg_horizontal_gap_months, stats.avg_horizontal_gap_months],
             mode: 'lines',
             type: 'scatter',
