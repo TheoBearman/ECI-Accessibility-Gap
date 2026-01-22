@@ -1,6 +1,6 @@
 /**
  * ECI Accessibility Gap - Interactive Chart Visualization
- * 
+ *
  * Creates a Plotly.js visualization showing the performance gap between
  * open and closed-source AI models on the Epoch AI ECI index.
  */
@@ -13,6 +13,13 @@ const COLORS = {
     connector: '#5c6bc0',
     annotation: '#6b7280',
     gridline: '#e5e7eb',
+};
+
+// Global state
+let appState = {
+    data: null,
+    gapMetric: 'average', // 'average' or 'current'
+    framing: 'open', // 'open' or 'china'
 };
 
 /**
@@ -28,17 +35,18 @@ async function init() {
         }
         const data = await response.json();
 
+        // Store data globally
+        appState.data = data;
+
         // Hide loading indicator
         document.getElementById('loading').classList.add('hidden');
 
+        // Set up toggle button handlers
+        setupToggleHandlers();
+
         // Render chart and update UI
         if (data) {
-            renderChart(data);
-            renderTrendChart(data);
-            updateStats(data.statistics);
-            updateTitle(data.statistics.avg_horizontal_gap_months);
-            updateLastUpdated(data.last_updated);
-            renderTable(data.trend_models || data.models); // Use all models for table
+            renderAll();
         }
 
     } catch (error) {
@@ -59,6 +67,140 @@ async function init() {
             </div>
         `;
     }
+}
+
+/**
+ * Set up toggle button event handlers
+ */
+function setupToggleHandlers() {
+    // Gap metric toggle
+    document.querySelectorAll('#gap-toggle .toggle-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('#gap-toggle .toggle-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            appState.gapMetric = this.dataset.value;
+            updateDisplay();
+        });
+    });
+
+    // Framing toggle
+    document.querySelectorAll('#framing-toggle .toggle-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('#framing-toggle .toggle-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            appState.framing = this.dataset.value;
+            updateFramingLabels();
+            renderAll();
+        });
+    });
+}
+
+/**
+ * Update the framing labels in the title and legend
+ */
+function updateFramingLabels() {
+    const openLabel = document.getElementById('category-open');
+    const closedLabel = document.getElementById('category-closed');
+
+    if (appState.framing === 'china') {
+        openLabel.textContent = 'China';
+        closedLabel.textContent = 'US';
+    } else {
+        openLabel.textContent = 'open';
+        closedLabel.textContent = 'closed-source';
+    }
+}
+
+/**
+ * Get the current data based on framing selection
+ */
+function getCurrentData() {
+    const data = appState.data;
+    if (appState.framing === 'china' && data.china_framing) {
+        return {
+            ...data,
+            gaps: data.china_framing.gaps || data.gaps,
+            statistics: data.china_framing.statistics || data.statistics,
+            historical_gaps: data.china_framing.historical_gaps || data.historical_gaps,
+        };
+    }
+    return data;
+}
+
+/**
+ * Update display based on current gap metric selection
+ */
+function updateDisplay() {
+    const currentData = getCurrentData();
+    const stats = currentData.statistics;
+    const gaps = currentData.gaps;
+
+    if (appState.gapMetric === 'current') {
+        const estimate = stats.current_gap_estimate || {};
+        const gapValue = estimate.estimated_current_gap || stats.avg_horizontal_gap_months;
+        updateTitle(gapValue);
+        updateStatsCurrentGap(stats);
+        showExplainer(stats, gaps);
+    } else {
+        updateTitle(stats.avg_horizontal_gap_months);
+        updateStats(stats);
+        hideExplainer();
+    }
+
+    // Re-render historical chart to reflect gap metric mode
+    renderHistoricalChart(currentData);
+}
+
+/**
+ * Show the current gap explainer panel with data
+ */
+function showExplainer(stats, gaps) {
+    const explainer = document.getElementById('current-gap-explainer');
+    const list = document.getElementById('unmatched-ages-list');
+    const minBound = document.getElementById('min-bound-value');
+
+    if (!explainer || !list) return;
+
+    // Get unmatched models with their ages
+    const unmatched = gaps.filter(g => !g.matched);
+    const estimate = stats.current_gap_estimate || {};
+
+    // Populate the list
+    list.innerHTML = unmatched
+        .sort((a, b) => b.gap_months - a.gap_months)
+        .map(g => `<li><strong>${g.closed_model}</strong>: ${g.gap_months} months old (ECI: ${g.closed_eci.toFixed(1)})</li>`)
+        .join('');
+
+    // Set minimum bound
+    if (minBound) {
+        minBound.textContent = estimate.min_current_gap || '--';
+    }
+
+    explainer.classList.remove('hidden');
+}
+
+/**
+ * Hide the current gap explainer panel
+ */
+function hideExplainer() {
+    const explainer = document.getElementById('current-gap-explainer');
+    if (explainer) {
+        explainer.classList.add('hidden');
+    }
+}
+
+/**
+ * Render all charts and update all displays
+ */
+function renderAll() {
+    const currentData = getCurrentData();
+
+    renderChart(currentData);
+    renderTrendChart(currentData);
+    renderHistoricalChart(currentData);
+    updateDisplay();
+    updateLastUpdated(currentData.last_updated);
+    renderTable(currentData.trend_models || currentData.models);
 }
 
 /**
@@ -582,6 +724,148 @@ function renderChart(data) {
 }
 
 /**
+ * Render the historical gap chart
+ * Dynamic based on gap metric selection (average vs current)
+ */
+function renderHistoricalChart(data) {
+    const historicalGaps = data.historical_gaps || [];
+
+    if (historicalGaps.length === 0) {
+        document.getElementById('historical-chart').innerHTML =
+            '<p style="text-align: center; color: #6b7280; padding: 2rem;">No historical data available.</p>';
+        return;
+    }
+
+    const stats = data.statistics;
+    const traces = [];
+    const annotations = [];
+    const isCurrentGapMode = appState.gapMetric === 'current';
+
+    // Main gap line
+    traces.push({
+        x: historicalGaps.map(g => g.date),
+        y: historicalGaps.map(g => g.gap_months),
+        mode: 'lines+markers',
+        type: 'scatter',
+        name: 'Gap at Frontier',
+        line: { color: COLORS.open, width: 2 },
+        marker: { color: COLORS.open, size: 6 },
+        hovertemplate: historicalGaps.map(g =>
+            `<b>%{x|%b %Y}</b><br>Gap: ${g.gap_months} mo<br>` +
+            `Open frontier: ${g.open_frontier_model || 'N/A'}<br>` +
+            `Closed frontier: ${g.reference_model || 'N/A'}<extra></extra>`
+        ),
+    });
+
+    // In "current gap" mode, add estimated current gap point and explanation
+    if (isCurrentGapMode && stats.current_gap_estimate) {
+        const estimate = stats.current_gap_estimate;
+        const lastGap = historicalGaps[historicalGaps.length - 1];
+        const today = new Date().toISOString();
+
+        // Add estimated current gap as a separate point
+        traces.push({
+            x: [today],
+            y: [estimate.estimated_current_gap],
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Estimated Current Gap',
+            marker: {
+                color: COLORS.closed,
+                size: 12,
+                symbol: 'star',
+                line: { width: 2, color: 'white' }
+            },
+            hovertemplate: `<b>Estimated Current Gap</b><br>` +
+                `${estimate.estimated_current_gap} months<br>` +
+                `Min bound: ${estimate.min_current_gap} mo<extra></extra>`,
+        });
+
+        // Add shaded region showing uncertainty (min bound to estimate)
+        if (lastGap) {
+            traces.push({
+                x: [lastGap.date, today, today, lastGap.date],
+                y: [lastGap.gap_months, estimate.min_current_gap, estimate.estimated_current_gap, lastGap.gap_months],
+                fill: 'toself',
+                fillcolor: 'rgba(229, 57, 53, 0.15)',
+                line: { color: 'transparent' },
+                type: 'scatter',
+                name: 'Uncertainty Range',
+                hoverinfo: 'skip',
+                showlegend: true,
+            });
+        }
+
+        // Annotation for the estimate
+        annotations.push({
+            x: today,
+            y: estimate.estimated_current_gap,
+            text: `Est: ${estimate.estimated_current_gap} mo`,
+            showarrow: true,
+            arrowhead: 2,
+            ax: -50,
+            ay: -25,
+            bgcolor: 'rgba(255, 255, 255, 0.9)',
+            bordercolor: COLORS.closed,
+            borderwidth: 1,
+            font: { size: 11, color: COLORS.closed },
+        });
+    }
+
+    // Add average gap reference line in average mode
+    if (!isCurrentGapMode && stats.avg_horizontal_gap_months) {
+        traces.push({
+            x: [historicalGaps[0]?.date, historicalGaps[historicalGaps.length - 1]?.date],
+            y: [stats.avg_horizontal_gap_months, stats.avg_horizontal_gap_months],
+            mode: 'lines',
+            type: 'scatter',
+            name: `Overall Average (${stats.avg_horizontal_gap_months} mo)`,
+            line: { color: COLORS.annotation, width: 2, dash: 'dash' },
+            hoverinfo: 'skip',
+        });
+    }
+
+    const layout = {
+        title: '',
+        margin: { l: 60, r: 40, t: 20, b: 60 },
+        height: 400,
+        xaxis: {
+            title: 'Date',
+            titlefont: { size: 12, color: COLORS.annotation },
+            tickfont: { size: 11, color: COLORS.annotation },
+            gridcolor: COLORS.gridline,
+        },
+        yaxis: {
+            title: isCurrentGapMode ? 'Gap (Months) - with Current Estimate' : 'Gap (Months)',
+            titlefont: { size: 12, color: COLORS.annotation },
+            tickfont: { size: 11, color: COLORS.annotation },
+            gridcolor: COLORS.gridline,
+            rangemode: 'tozero',
+        },
+        annotations: annotations,
+        hovermode: 'x unified',
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+        legend: {
+            orientation: 'h',
+            yanchor: 'bottom',
+            y: 1.02,
+            xanchor: 'right',
+            x: 1,
+        },
+    };
+
+    const config = {
+        responsive: true,
+        displayModeBar: 'hover',
+        modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
+        displaylogo: false,
+    };
+
+    Plotly.newPlot('historical-chart', traces, layout, config);
+}
+
+/**
  * Update statistics display
  */
 function updateStats(stats) {
@@ -593,6 +877,30 @@ function updateStats(stats) {
         stats.total_matched;
     document.getElementById('stat-unmatched').textContent =
         stats.total_unmatched;
+
+    // Update stat labels for average gap view
+    document.querySelector('#stat-avg-gap').closest('.stat-card').querySelector('.stat-label').textContent = 'Average Gap';
+    document.querySelector('#stat-ci').closest('.stat-card').querySelector('.stat-label').textContent = '90% CI';
+}
+
+/**
+ * Update statistics display for current gap view
+ */
+function updateStatsCurrentGap(stats) {
+    const estimate = stats.current_gap_estimate || {};
+
+    document.getElementById('stat-avg-gap').textContent =
+        `${estimate.estimated_current_gap || '--'} mo`;
+    document.getElementById('stat-ci').textContent =
+        `≥ ${estimate.min_current_gap || '--'} mo`;
+    document.getElementById('stat-matched').textContent =
+        stats.total_matched;
+    document.getElementById('stat-unmatched').textContent =
+        stats.total_unmatched;
+
+    // Update stat labels for current gap view
+    document.querySelector('#stat-avg-gap').closest('.stat-card').querySelector('.stat-label').textContent = 'Est. Current Gap';
+    document.querySelector('#stat-ci').closest('.stat-card').querySelector('.stat-label').textContent = 'Minimum Bound';
 }
 
 /**

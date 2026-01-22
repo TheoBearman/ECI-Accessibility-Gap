@@ -15,14 +15,31 @@
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     
     <!-- Styles -->
-    <link rel="stylesheet" href="static/style.css">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <h1 id="main-title">The performance gap between frontier <span class="text-open">open</span> and <span class="text-closed">closed-source</span> models on the ECI is around <span id="gap-value">--</span> months</h1>
+            <h1 id="main-title">The performance gap between frontier <span class="text-open" id="category-open">open</span> and <span class="text-closed" id="category-closed">closed-source</span> models on the ECI is around <span id="gap-value">--</span> months</h1>
             <p class="subtitle">Source: Epoch AI Epoch Capabilities Index (Frontier Models only).</p>
         </header>
+
+        <div class="controls-panel">
+            <div class="control-group">
+                <span class="control-label">Gap Metric:</span>
+                <div class="toggle-buttons" id="gap-toggle">
+                    <button class="toggle-btn active" data-value="average">Average Gap</button>
+                    <button class="toggle-btn" data-value="current">Current Gap (Est.)</button>
+                </div>
+            </div>
+            <div class="control-group">
+                <span class="control-label">Framing:</span>
+                <div class="toggle-buttons" id="framing-toggle">
+                    <button class="toggle-btn active" data-value="open">Open vs Closed</button>
+                    <button class="toggle-btn" data-value="china">China vs US</button>
+                </div>
+            </div>
+        </div>
 
         <div class="legend">
             <div class="legend-item">
@@ -73,6 +90,39 @@
             </div>
         </div>
 
+        <div id="current-gap-explainer" class="explainer-panel hidden">
+            <div class="explainer-header">
+                <strong>How is the current gap estimated?</strong>
+            </div>
+            <div class="explainer-content">
+                <p>The <strong>average gap</strong> (4.7 months) is based on historical matched pairs, but this may underestimate the <em>current</em> gap because it doesn't fully account for models that haven't been matched yet.</p>
+
+                <p>The <strong>estimated current gap</strong> treats unmatched frontier models as <strong>censored observations</strong> &mdash; they tell us the gap is <em>at least</em> as long as their age:</p>
+
+                <ul id="unmatched-ages-list"></ul>
+
+                <p><strong>Methodology:</strong> We use a Bayesian-inspired approach where:</p>
+                <ol>
+                    <li>The prior is the historical average gap from matched pairs</li>
+                    <li>Unmatched model ages provide lower bounds (censored data)</li>
+                    <li>Older unmatched models are weighted more heavily (stronger evidence)</li>
+                    <li>An uncertainty premium is added based on the number of unmatched models and historical variance</li>
+                </ol>
+
+                <p class="explainer-note">
+                    <strong>Minimum bound:</strong> <span id="min-bound-value">--</span> months &mdash; the gap cannot be shorter than the age of the oldest unmatched model.
+                </p>
+            </div>
+        </div>
+
+        <div class="header">
+            <h1>Gap Over Time</h1>
+            <p class="subtitle">How the performance gap has evolved historically.</p>
+        </div>
+        <div id="historical-chart-container" style="position: relative; min-height: 400px; margin-bottom: 2rem;">
+             <div id="historical-chart" style="width: 100%; height: 400px;"></div>
+        </div>
+
         <div class="header">
             <h1>ECI Growth Trends (Pre vs Post April 2024)</h1>
             <p class="subtitle">Comparing the rate of ECI increases before and after April 2024 (All Models).</p>
@@ -107,6 +157,6 @@
         </footer>
     </div>
 
-    <script src="static/script.js" onerror="document.getElementById('loading').innerHTML = '<p style=\'color:red\'>Error: Failed to load script.js. This is likely a path or caching issue.</p>'"></script>
+    <script src="/static/script.js"></script>
 </body>
 </html>
