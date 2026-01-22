@@ -1834,10 +1834,10 @@
     }
   ],
   "statistics": {
-    "avg_horizontal_gap_months": 6.2,
-    "std_horizontal_gap": 3.9,
+    "avg_horizontal_gap_months": 4.7,
+    "std_horizontal_gap": 2.5,
     "ci_90_low": 1.1,
-    "ci_90_high": 13.8,
+    "ci_90_high": 9.2,
     "current_vertical_gap": 8.5,
     "total_matched": 8,
     "total_unmatched": 5,
@@ -2308,9 +2308,9 @@
       }
     ],
     "statistics": {
-      "avg_horizontal_gap_months": 6.9,
-      "std_horizontal_gap": 3.4,
-      "ci_90_low": 2.1,
+      "avg_horizontal_gap_months": 7.1,
+      "std_horizontal_gap": 4.0,
+      "ci_90_low": 1.1,
       "ci_90_high": 13.8,
       "current_vertical_gap": 8.5,
       "total_matched": 9,
@@ -2598,5 +2598,5 @@
       }
     ]
   },
-  "last_updated": "2026-01-22T11:02:32.632222"
+  "last_updated": "2026-01-22T11:14:20.497136"
 }
