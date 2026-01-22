@@ -215,10 +215,12 @@ function showExplainer(stats, gaps) {
         explainerAvgGap.textContent = stats.avg_horizontal_gap_months.toFixed(1);
     }
 
-    // Render distribution chart if prior params are available
-    renderDistributionChart(estimate);
-
     explainer.classList.remove('hidden');
+
+    // Render distribution chart after panel is visible (Plotly needs visible container)
+    requestAnimationFrame(() => {
+        renderDistributionChart(estimate);
+    });
 }
 
 /**
@@ -226,7 +228,15 @@ function showExplainer(stats, gaps) {
  */
 function renderDistributionChart(estimate) {
     const chartDiv = document.getElementById('distribution-chart');
-    if (!chartDiv || !estimate.prior_params) return;
+    if (!chartDiv) {
+        console.warn('Distribution chart div not found');
+        return;
+    }
+    if (!estimate || !estimate.prior_params) {
+        console.warn('No prior_params in estimate:', estimate);
+        chartDiv.innerHTML = '<p style="color: #6b7280; font-size: 0.9em; text-align: center;">Distribution data not available.</p>';
+        return;
+    }
 
     const { mu, sigma, prior_mean_months } = estimate.prior_params;
     const estimatedGap = estimate.estimated_current_gap;
