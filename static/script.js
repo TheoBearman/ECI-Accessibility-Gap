@@ -169,8 +169,18 @@ function updateBenchmarkDisplay() {
         scoreHeader.textContent = appState.currentBenchmark === 'eci' ? 'ECI' : unit;
     }
 
-    // Note: Trend chart title/subtitle are updated dynamically in renderTrendChart()
-    // based on the actual trend data available for each benchmark
+    // Update trend chart title
+    const trendTitle = document.getElementById('trend-title');
+    if (trendTitle) {
+        const unit = appState.currentBenchmark === 'eci' ? 'ECI' : 'Score';
+        trendTitle.textContent = `${unit} Growth Trends (Pre vs Post April 2024)`;
+    }
+
+    const trendSubtitle = document.getElementById('trend-subtitle');
+    if (trendSubtitle) {
+        const unit = appState.currentBenchmark === 'eci' ? 'ECI' : 'score';
+        trendSubtitle.textContent = `Comparing the rate of ${unit} increases before and after April 2024 (All Models).`;
+    }
 
     // Update data summary
     const dataSummary = document.getElementById('data-summary');
@@ -183,7 +193,7 @@ function updateBenchmarkDisplay() {
     if (chartNote && metadata?.threshold !== undefined) {
         const thresholdValue = metadata.threshold;
         const unit = metadata.unit || 'points';
-        chartNote.innerHTML = `Note: A model is deemed to have matched if its <strong>${unit}</strong> is within <strong>${thresholdValue} percentage point${thresholdValue === 1 ? '' : 's'}</strong> of the reference model.<br>
+        chartNote.innerHTML = `Note: A model is deemed to have caught up if its score is <strong>within ${thresholdValue} ${unit}</strong> of the reference model.<br>
             <em>Average gap is computed by sampling 100 score levels and measuring time-to-match at each level, starting from the level where reference models first appear.<br>
             Matched/Unmatched counts reflect all reference models shown on the chart.</em>`;
     }
@@ -524,24 +534,18 @@ function renderAll() {
 }
 
 /**
- * Render the trend chart with dynamic trend lines based on data
+ * Render the trend chart showing pre/post 2025 regression lines
  */
 function renderTrendChart(data) {
-    const trends = data.trends || {};
-    const models = data.trend_models || data.models;
+    const trends = data.trends;
+    const models = data.trend_models || data.models; // Fallback only if backend not updated immediately
     const traces = [];
     const scoreField = getScoreField();
-    const annotations = [];
 
-    if (!models || models.length === 0) {
-        document.getElementById('trend-chart').innerHTML =
-            '<p style="text-align: center; color: #6b7280; padding: 2rem;">No trend data available.</p>';
-        return;
-    }
-
-    // All models scatter
+    // All models scatter - use score or eci depending on benchmark
     const closedModels = models.filter(m => !m.is_open && m.date && (m[scoreField] || m.eci || m.score));
     const openModels = models.filter(m => m.is_open && m.date && (m[scoreField] || m.eci || m.score));
+
     const getScore = (m) => m[scoreField] ?? m.eci ?? m.score;
 
     traces.push({
@@ -564,91 +568,77 @@ function renderTrendChart(data) {
         text: openModels.map(m => m.display_name),
     });
 
-    const metadata = getBenchmarkMetadata();
-    const unitName = appState.currentBenchmark === 'eci' ? 'ECI points' : (metadata?.unit || 'points');
-    const trendMeta = trends.metadata || {};
-
-    // Determine which trend keys to use
-    let trendKeys = [];
-    if (trendMeta.has_split && trends.early && trends.recent) {
-        trendKeys = ['early', 'recent'];
-    } else if (trends.pre_apr_2024 && trends.post_apr_2024) {
-        // Fallback to Apr 2024 split for backwards compatibility
-        trendKeys = ['pre_apr_2024', 'post_apr_2024'];
-    } else if (trends.overall) {
-        trendKeys = ['overall'];
-    }
-
-    // Add trend lines
-    trendKeys.forEach((key, index) => {
+    // Trend Lines and Stats
+    ['pre_apr_2024', 'post_apr_2024'].forEach((key, index) => {
         const trend = trends[key];
-        if (!trend) return;
+        if (trend) {
+            // Line trace
+            traces.push({
+                x: [trend.start_point.date, trend.end_point.date],
+                y: [trend.start_point.eci, trend.end_point.eci],
+                mode: 'lines',
+                type: 'scatter',
+                name: `${trend.name}`,
+                line: {
+                    width: 4,
+                    dash: key === 'post_apr_2024' ? 'solid' : 'dot',
+                    color: key === 'post_apr_2024' ? COLORS.open : COLORS.annotation
+                }
+            });
 
-        const isEarly = key === 'early' || key === 'pre_apr_2024';
-        const isOverall = key === 'overall';
+            // Stats Annotation
+            // Position: Pre-2025 near end of line, Post-2025 near start/middle
+            const isPre = key === 'pre_apr_2024';
+            const xPos = isPre ? trend.end_point.date : trend.start_point.date;
+            const yPos = isPre ? trend.end_point.eci : trend.start_point.eci;
 
-        traces.push({
-            x: [trend.start_point.date, trend.end_point.date],
-            y: [trend.start_point.eci, trend.end_point.eci],
-            mode: 'lines',
-            type: 'scatter',
-            name: trend.name,
-            line: {
-                width: 4,
-                dash: isEarly ? 'dot' : 'solid',
-                color: isOverall ? COLORS.open : (isEarly ? COLORS.annotation : COLORS.open)
+            const metadata = getBenchmarkMetadata();
+            const unitName = appState.currentBenchmark === 'eci' ? 'ECI points' : (metadata?.unit || 'points');
+            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ${unitName}/year`;
+
+            if (!isPre && trends['pre_apr_2024'] && trends['post_apr_2024']) {
+                const preRate = trends['pre_apr_2024'].absolute_growth_per_year;
+                const postRate = trends['post_apr_2024'].absolute_growth_per_year;
+                if (preRate > 0) {
+                    const factor = (postRate / preRate).toFixed(1);
+                    statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ${unitName}/year<br>${factor}x faster than Pre-Apr 2024`;
+                }
             }
-        });
 
-        // Stats annotation
-        const xPos = isEarly ? trend.end_point.date : trend.start_point.date;
-        const yPos = isEarly ? trend.end_point.eci : trend.start_point.eci;
+            const annotation = {
+                x: xPos,
+                y: yPos,
+                text: statsText,
+                showarrow: true,
+                arrowhead: 2,
+                ax: isPre ? -120 : 120, // Reduced offset for smaller box
+                ay: isPre ? -30 : 30,
+                bgcolor: 'rgba(255, 255, 255, 0.9)',
+                borderpad: 4,
+                bordercolor: COLORS.gridline,
+                borderwidth: 1,
+                align: 'left',
+                font: { size: 12, color: COLORS.text }
+            };
 
-        let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ${unitName}/year`;
+            // Add to layout annotations if we had access to layout, but here we construct layout below.
+            // We can attach it to the traces array as a custom property or just create a separate array.
+            // Wait, we can't attach to traces. We need to add to layout.annotations.
+            // Let's modify the function structure slightly to accumulate annotations.
 
-        // Add comparison if we have both periods
-        if (!isEarly && !isOverall && trendKeys.length === 2) {
-            const earlyKey = trendKeys[0];
-            const earlyTrend = trends[earlyKey];
-            if (earlyTrend && earlyTrend.absolute_growth_per_year > 0) {
-                const factor = (trend.absolute_growth_per_year / earlyTrend.absolute_growth_per_year).toFixed(1);
-                statsText += `<br>${factor}x faster than ${earlyTrend.name}`;
-            }
+            // Temporary storage on the trend object itself to retrieve later? 
+            // Better to change the loop structure. See below.
+            trend.annotation = annotation;
         }
-
-        annotations.push({
-            x: xPos,
-            y: yPos,
-            text: statsText,
-            showarrow: true,
-            arrowhead: 2,
-            ax: isEarly ? -120 : (isOverall ? 0 : 120),
-            ay: isEarly ? -30 : (isOverall ? -50 : 30),
-            bgcolor: 'rgba(255, 255, 255, 0.9)',
-            borderpad: 4,
-            bordercolor: COLORS.gridline,
-            borderwidth: 1,
-            align: 'left',
-            font: { size: 12, color: COLORS.text }
-        });
     });
 
-    // Update trend chart title based on available data
-    const trendTitle = document.getElementById('trend-title');
-    const trendSubtitle = document.getElementById('trend-subtitle');
-    if (trendTitle && trendSubtitle) {
-        const scoreLabel = appState.currentBenchmark === 'eci' ? 'ECI' : 'Score';
-        if (trendMeta.has_split) {
-            trendTitle.textContent = `${scoreLabel} Growth Trends (Pre vs Post ${trendMeta.split_label})`;
-            trendSubtitle.textContent = `Comparing the rate of ${scoreLabel.toLowerCase()} increases before and after ${trendMeta.split_label}.`;
-        } else if (trendKeys.includes('pre_apr_2024')) {
-            trendTitle.textContent = `${scoreLabel} Growth Trends (Pre vs Post April 2024)`;
-            trendSubtitle.textContent = `Comparing the rate of ${scoreLabel.toLowerCase()} increases before and after April 2024.`;
-        } else {
-            trendTitle.textContent = `${scoreLabel} Growth Trend`;
-            trendSubtitle.textContent = `Overall ${scoreLabel.toLowerCase()} growth rate for this benchmark.`;
+    // Collect annotations
+    const annotations = [];
+    ['pre_apr_2024', 'post_apr_2024'].forEach(key => {
+        if (trends[key] && trends[key].annotation) {
+            annotations.push(trends[key].annotation);
         }
-    }
+    });
 
     // Add "current date" vertical line logic
     const today = new Date().toISOString().split('T')[0];
@@ -767,7 +757,48 @@ function renderTrendChart(data) {
         displaylogo: false,
     };
 
-    Plotly.newPlot('trend-chart', traces, layout, config);
+    Plotly.newPlot('trend-chart', traces, layout, config).then(function (gd) {
+        gd.on('plotly_restyle', function (data) {
+            // data typically contains the update object (e.g. {visible: ['legendonly']}) and indices
+            // But we can simpler just check the full state of the chart
+
+            const currentTraces = gd.data;
+            const newAnnotations = [...layout.annotations]; // Copy existing structure
+
+            // Map known trace names to annotation indices
+            // Based on our loop above: 
+            // - traces[0]: Closed
+            // - traces[1]: Open
+            // - traces[2]: Pre-Mar 2024
+            // - traces[3]: Post-Mar 2024
+
+            // And annotations array:
+            // - annotations[0]: Pre-Mar 2024
+            // - annotations[1]: Post-Mar 2024
+
+            // We need to dynamically find the trace index for each trend name
+            const preTrendTraceIndex = currentTraces.findIndex(t => t.name === trends['pre_mar_2024']?.name);
+            const postTrendTraceIndex = currentTraces.findIndex(t => t.name === trends['post_mar_2024']?.name);
+
+            // Find annotation indices (assuming order matches creation order if we are consistent)
+            // But better to check some property? Text content is unique enough or we rely on loop order.
+            // Loop order: pre_mar_2024 pushed first, then post_mar_2024.
+            const preAnnotationIndex = 0;
+            const postAnnotationIndex = 1;
+
+            if (preTrendTraceIndex !== -1 && trends['pre_mar_2024']) {
+                const isVisible = currentTraces[preTrendTraceIndex].visible !== 'legendonly';
+                if (newAnnotations[preAnnotationIndex]) newAnnotations[preAnnotationIndex].visible = isVisible;
+            }
+
+            if (postTrendTraceIndex !== -1 && trends['post_mar_2024']) {
+                const isVisible = currentTraces[postTrendTraceIndex].visible !== 'legendonly';
+                if (newAnnotations[postAnnotationIndex]) newAnnotations[postAnnotationIndex].visible = isVisible;
+            }
+
+            Plotly.relayout(gd, { annotations: newAnnotations });
+        });
+    });
 }
 
 /**
