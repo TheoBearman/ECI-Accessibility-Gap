@@ -5,6 +5,8 @@
  * open and closed-source AI models on the Epoch AI ECI index.
  */
 
+console.log('[ECI] Script loaded');
+
 // Color scheme matching reference image
 const COLORS = {
     closed: '#e53935',
@@ -51,23 +53,28 @@ function getBenchmarkMetadata() {
  * Fetch data from the API and render the chart
  */
 async function init() {
+    console.log('[ECI] init() called');
     try {
         const url = 'data.json';
-        console.log(`Fetching data from: ${url}`);
+        console.log(`[ECI] Fetching data from: ${url}`);
         const response = await fetch(url);
+        console.log('[ECI] Fetch response:', response.status, response.ok);
         if (!response.ok) {
             throw new Error(`HTTP error: ${response.status} ${response.statusText} at ${response.url}`);
         }
         const data = await response.json();
+        console.log('[ECI] Data loaded, benchmarks:', Object.keys(data.benchmarks || {}));
 
         // Store data globally
         appState.data = data;
 
         // Set default benchmark
         appState.currentBenchmark = data.default_benchmark || 'eci';
+        console.log('[ECI] Current benchmark:', appState.currentBenchmark);
 
         // Hide loading indicator
         document.getElementById('loading').classList.add('hidden');
+        console.log('[ECI] Loading hidden');
 
         // Populate benchmark selector
         populateBenchmarkSelector();
@@ -77,7 +84,9 @@ async function init() {
 
         // Render chart and update UI
         if (data) {
+            console.log('[ECI] Calling renderAll()');
             renderAll();
+            console.log('[ECI] renderAll() complete');
         }
 
     } catch (error) {
