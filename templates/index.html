@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ECI Accessibility Gap</title>
-    <meta name="description" content="Interactive visualization of the performance gap between frontier open and closed-source AI models on the Epoch AI ECI index.">
+    <title>AI Benchmark Accessibility Gap</title>
+    <meta name="description" content="Interactive visualization of the performance gap between frontier open and closed-source AI models across various benchmarks.">
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,11 +20,18 @@
 <body>
     <div class="container">
         <header class="header">
-            <h1 id="main-title">The performance gap between frontier <span class="text-open" id="category-open">open</span> and <span class="text-closed" id="category-closed">closed-source</span> models on the ECI is around <span id="gap-value">--</span> months</h1>
-            <p class="subtitle">Source: Epoch AI Epoch Capabilities Index (Frontier Models only).</p>
+            <h1 id="main-title">The performance gap between frontier <span class="text-open" id="category-open">open</span> and <span class="text-closed" id="category-closed">closed-source</span> models on <span id="benchmark-name">ECI</span> is around <span id="gap-value">--</span> months</h1>
+            <p class="subtitle" id="benchmark-source">Source: Epoch AI Epoch Capabilities Index (Frontier Models only).</p>
         </header>
 
         <div class="controls-panel">
+            <div class="control-group">
+                <span class="control-label">Benchmark:</span>
+                <select id="benchmark-select" class="benchmark-select">
+                    <option value="eci">Epoch Capabilities Index (ECI)</option>
+                    <!-- Additional options will be populated by script.js -->
+                </select>
+            </div>
             <div class="control-group">
                 <span class="control-label">Gap Metric:</span>
                 <div class="toggle-buttons" id="gap-toggle">
@@ -56,7 +63,7 @@
             </div>
             <div class="legend-item">
                 <span class="legend-connector"></span>
-                <span id="legend-connector">First open model to match ECI</span>
+                <span id="legend-connector">First open model to match score</span>
             </div>
         </div>
 
@@ -66,9 +73,9 @@
                 <p>Loading ECI data...</p>
             </div>
             <div id="chart"></div>
-            <p class="subtitle" style="text-align: center; margin-top: var(--spacing-sm);">
-                Note: A model is deemed to have caught up if its ECI score is <strong>within 1 point</strong> of the reference model.<br>
-                <em>Average gap is computed by sampling 100 ECI levels and measuring time-to-match at each level, starting from the ECI level where reference models first appear.<br>
+            <p class="subtitle" id="chart-note" style="text-align: center; margin-top: var(--spacing-sm);">
+                Note: A model is deemed to have caught up if its score is <strong>within the threshold</strong> of the reference model.<br>
+                <em>Average gap is computed by sampling 100 score levels and measuring time-to-match at each level, starting from the level where reference models first appear.<br>
                 Matched/Unmatched counts reflect all reference models shown on the chart.</em>
             </p>
         </div>
@@ -131,22 +138,22 @@
         </div>
 
         <div class="header">
-            <h1>ECI Growth Trends (Pre vs Post April 2024)</h1>
-            <p class="subtitle">Comparing the rate of ECI increases before and after April 2024 (All Models).</p>
+            <h1 id="trend-title">Score Growth Trends (Pre vs Post April 2024)</h1>
+            <p class="subtitle" id="trend-subtitle">Comparing the rate of score increases before and after April 2024 (All Models).</p>
         </div>
         <div id="trend-chart-container" style="position: relative; min-height: 500px; margin-bottom: 2rem;">
              <div id="trend-chart" style="width: 100%; height: 500px;"></div>
         </div>
 
         <details class="data-panel">
-            <summary class="data-summary">View Raw ECI Data (All Models)</summary>
+            <summary class="data-summary" id="data-summary">View Raw Data (All Models)</summary>
             <div class="table-container">
                 <table id="eci-table">
                     <thead>
                         <tr>
                             <th>Model</th>
                             <th>Release Date</th>
-                            <th>ECI</th>
+                            <th id="score-header">Score</th>
                             <th>Type</th>
                             <th>Organization</th>
                         </tr>

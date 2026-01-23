@@ -20,7 +20,32 @@ let appState = {
     data: null,
     gapMetric: 'average', // 'average' or 'current'
     framing: 'open', // 'open' or 'china'
+    currentBenchmark: 'eci', // Current selected benchmark
 };
+
+/**
+ * Get the score field name for the current benchmark
+ * ECI uses 'eci', other benchmarks use 'score'
+ */
+function getScoreField() {
+    return appState.currentBenchmark === 'eci' ? 'eci' : 'score';
+}
+
+/**
+ * Get the score standard deviation field name for the current benchmark
+ */
+function getScoreStdField() {
+    return appState.currentBenchmark === 'eci' ? 'eci_std' : 'score_std';
+}
+
+/**
+ * Get the benchmark metadata
+ */
+function getBenchmarkMetadata() {
+    const benchmarks = appState.data?.benchmarks;
+    if (!benchmarks) return null;
+    return benchmarks[appState.currentBenchmark]?.metadata || null;
+}
 
 /**
  * Fetch data from the API and render the chart
@@ -38,8 +63,14 @@ async function init() {
         // Store data globally
         appState.data = data;
 
+        // Set default benchmark
+        appState.currentBenchmark = data.default_benchmark || 'eci';
+
         // Hide loading indicator
         document.getElementById('loading').classList.add('hidden');
+
+        // Populate benchmark selector
+        populateBenchmarkSelector();
 
         // Set up toggle button handlers
         setupToggleHandlers();
@@ -66,6 +97,106 @@ async function init() {
                 <p style="font-size: 0.9em; margin-top: 10px; color: #666;">If this persists on GitHub Pages, verify the repository permissions and that the deployment action succeeded.</p>
             </div>
         `;
+    }
+}
+
+/**
+ * Populate the benchmark selector dropdown with available benchmarks
+ */
+function populateBenchmarkSelector() {
+    const select = document.getElementById('benchmark-select');
+    if (!select || !appState.data?.benchmarks) return;
+
+    // Clear existing options
+    select.innerHTML = '';
+
+    // Add options for each benchmark
+    const benchmarks = appState.data.benchmarks;
+    const benchmarkOrder = ['eci', 'gpqa_diamond', 'math_level_5', 'otis_mock_aime', 'swe_bench_verified', 'simpleqa_verified', 'frontiermath_public', 'chess_puzzles'];
+
+    // Sort benchmarks with ECI first, then alphabetically
+    const sortedBenchmarks = Object.keys(benchmarks).sort((a, b) => {
+        const aIndex = benchmarkOrder.indexOf(a);
+        const bIndex = benchmarkOrder.indexOf(b);
+        if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+    });
+
+    for (const benchmarkId of sortedBenchmarks) {
+        const benchmark = benchmarks[benchmarkId];
+        const metadata = benchmark.metadata;
+        const option = document.createElement('option');
+        option.value = benchmarkId;
+        option.textContent = metadata?.name || benchmarkId;
+        if (benchmarkId === appState.currentBenchmark) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    }
+
+    // Add change handler
+    select.addEventListener('change', function() {
+        appState.currentBenchmark = this.value;
+        updateBenchmarkDisplay();
+        renderAll();
+    });
+}
+
+/**
+ * Update the UI elements that depend on the current benchmark
+ */
+function updateBenchmarkDisplay() {
+    const metadata = getBenchmarkMetadata();
+    if (!metadata) return;
+
+    // Update title benchmark name
+    const benchmarkNameEl = document.getElementById('benchmark-name');
+    if (benchmarkNameEl) {
+        benchmarkNameEl.textContent = metadata.name || appState.currentBenchmark;
+    }
+
+    // Update source subtitle
+    const sourceEl = document.getElementById('benchmark-source');
+    if (sourceEl) {
+        sourceEl.textContent = `Source: Epoch AI ${metadata.name} (Frontier Models only).`;
+    }
+
+    // Update score column header
+    const scoreHeader = document.getElementById('score-header');
+    if (scoreHeader) {
+        const unit = metadata.unit || 'Score';
+        scoreHeader.textContent = appState.currentBenchmark === 'eci' ? 'ECI' : unit;
+    }
+
+    // Update trend chart title
+    const trendTitle = document.getElementById('trend-title');
+    if (trendTitle) {
+        const unit = appState.currentBenchmark === 'eci' ? 'ECI' : 'Score';
+        trendTitle.textContent = `${unit} Growth Trends (Pre vs Post April 2024)`;
+    }
+
+    const trendSubtitle = document.getElementById('trend-subtitle');
+    if (trendSubtitle) {
+        const unit = appState.currentBenchmark === 'eci' ? 'ECI' : 'score';
+        trendSubtitle.textContent = `Comparing the rate of ${unit} increases before and after April 2024 (All Models).`;
+    }
+
+    // Update data summary
+    const dataSummary = document.getElementById('data-summary');
+    if (dataSummary) {
+        dataSummary.textContent = `View Raw ${metadata.name || 'Benchmark'} Data (All Models)`;
+    }
+
+    // Update chart note with actual threshold value
+    const chartNote = document.getElementById('chart-note');
+    if (chartNote && metadata?.threshold !== undefined) {
+        const thresholdValue = metadata.threshold;
+        const unit = metadata.unit || 'points';
+        chartNote.innerHTML = `Note: A model is deemed to have caught up if its score is <strong>within ${thresholdValue} ${unit}</strong> of the reference model.<br>
+            <em>Average gap is computed by sampling 100 score levels and measuring time-to-match at each level, starting from the level where reference models first appear.<br>
+            Matched/Unmatched counts reflect all reference models shown on the chart.</em>`;
     }
 }
 
@@ -99,6 +230,9 @@ function setupToggleHandlers() {
  * Get labels based on current framing
  */
 function getFramingLabels() {
+    const metadata = getBenchmarkMetadata();
+    const scoreName = metadata?.name || 'score';
+
     if (appState.framing === 'china') {
         return {
             open: 'Chinese',
@@ -106,7 +240,7 @@ function getFramingLabels() {
             openModel: 'Chinese model',
             closedModel: 'US model',
             unmatched: 'US model not yet matched by Chinese models',
-            connector: 'First Chinese model to match ECI',
+            connector: `First Chinese model to match ${scoreName}`,
         };
     } else {
         return {
@@ -115,7 +249,7 @@ function getFramingLabels() {
             openModel: 'Open model',
             closedModel: 'Closed model',
             unmatched: 'Closed model not yet matched by open models',
-            connector: 'First open model to match ECI',
+            connector: `First open model to match ${scoreName}`,
         };
     }
 }
@@ -145,19 +279,42 @@ function updateFramingLabels() {
 }
 
 /**
- * Get the current data based on framing selection
+ * Get the current data based on benchmark and framing selection
  */
 function getCurrentData() {
     const data = appState.data;
-    if (appState.framing === 'china' && data.china_framing) {
-        return {
-            ...data,
-            gaps: data.china_framing.gaps || data.gaps,
-            statistics: data.china_framing.statistics || data.statistics,
-            historical_gaps: data.china_framing.historical_gaps || data.historical_gaps,
+    if (!data) return null;
+
+    // Get benchmark-specific data
+    const benchmarkData = data.benchmarks?.[appState.currentBenchmark];
+    if (!benchmarkData) {
+        console.warn(`Benchmark ${appState.currentBenchmark} not found`);
+        return null;
+    }
+
+    // Base data from the selected benchmark
+    let result = {
+        models: benchmarkData.models,
+        trend_models: benchmarkData.trend_models,
+        gaps: benchmarkData.gaps,
+        statistics: benchmarkData.statistics,
+        trends: benchmarkData.trends,
+        historical_gaps: benchmarkData.historical_gaps,
+        metadata: benchmarkData.metadata,
+        last_updated: data.last_updated,
+    };
+
+    // Apply China framing if selected and available
+    if (appState.framing === 'china' && benchmarkData.china_framing) {
+        result = {
+            ...result,
+            gaps: benchmarkData.china_framing.gaps || result.gaps,
+            statistics: benchmarkData.china_framing.statistics || result.statistics,
+            historical_gaps: benchmarkData.china_framing.historical_gaps || result.historical_gaps,
         };
     }
-    return data;
+
+    return result;
 }
 
 /**
@@ -199,9 +356,16 @@ function showExplainer(stats, gaps) {
     const estimate = stats.current_gap_estimate || {};
 
     // Populate the list
+    const scoreField = appState.currentBenchmark === 'eci' ? 'closed_eci' : 'closed_score';
+    const metadata = getBenchmarkMetadata();
+    const scoreName = metadata?.unit || 'Score';
+
     list.innerHTML = unmatched
         .sort((a, b) => b.gap_months - a.gap_months)
-        .map(g => `<li><strong>${g.closed_model}</strong>: ${g.gap_months} months old (ECI: ${g.closed_eci.toFixed(1)})</li>`)
+        .map(g => {
+            const score = g[scoreField] ?? g.closed_eci ?? g.closed_score;
+            return `<li><strong>${g.closed_model}</strong>: ${g.gap_months} months old (${scoreName}: ${score?.toFixed(1) || 'N/A'})</li>`;
+        })
         .join('');
 
     // Set minimum bound
@@ -355,7 +519,12 @@ function hideExplainer() {
  */
 function renderAll() {
     const currentData = getCurrentData();
+    if (!currentData) {
+        console.warn('No data available for rendering');
+        return;
+    }
 
+    updateBenchmarkDisplay();
     updateFramingLabels();
     renderChart(currentData);
     renderTrendChart(currentData);
@@ -372,14 +541,17 @@ function renderTrendChart(data) {
     const trends = data.trends;
     const models = data.trend_models || data.models; // Fallback only if backend not updated immediately
     const traces = [];
+    const scoreField = getScoreField();
 
-    // All models scatter
-    const closedModels = models.filter(m => !m.is_open && m.date && m.eci);
-    const openModels = models.filter(m => m.is_open && m.date && m.eci);
+    // All models scatter - use score or eci depending on benchmark
+    const closedModels = models.filter(m => !m.is_open && m.date && (m[scoreField] || m.eci || m.score));
+    const openModels = models.filter(m => m.is_open && m.date && (m[scoreField] || m.eci || m.score));
+
+    const getScore = (m) => m[scoreField] ?? m.eci ?? m.score;
 
     traces.push({
         x: closedModels.map(m => m.date),
-        y: closedModels.map(m => m.eci),
+        y: closedModels.map(m => getScore(m)),
         mode: 'markers',
         type: 'scatter',
         name: 'Closed',
@@ -389,7 +561,7 @@ function renderTrendChart(data) {
 
     traces.push({
         x: openModels.map(m => m.date),
-        y: openModels.map(m => m.eci),
+        y: openModels.map(m => getScore(m)),
         mode: 'markers',
         type: 'scatter',
         name: 'Open',
@@ -421,14 +593,16 @@ function renderTrendChart(data) {
             const xPos = isPre ? trend.end_point.date : trend.start_point.date;
             const yPos = isPre ? trend.end_point.eci : trend.start_point.eci;
 
-            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI points/year`;
+            const metadata = getBenchmarkMetadata();
+            const unitName = appState.currentBenchmark === 'eci' ? 'ECI points' : (metadata?.unit || 'points');
+            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ${unitName}/year`;
 
             if (!isPre && trends['pre_apr_2024'] && trends['post_apr_2024']) {
                 const preRate = trends['pre_apr_2024'].absolute_growth_per_year;
                 const postRate = trends['post_apr_2024'].absolute_growth_per_year;
                 if (preRate > 0) {
                     const factor = (postRate / preRate).toFixed(1);
-                    statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI points/year<br>${factor}x faster than Pre-Apr 2024`;
+                    statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ${unitName}/year<br>${factor}x faster than Pre-Apr 2024`;
                 }
             }
 
@@ -486,64 +660,77 @@ function renderTrendChart(data) {
         yshift: 10,
     });
 
+    // Y-axis title based on benchmark
+    const trendMetadata = getBenchmarkMetadata();
+    const yAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' : (trendMetadata?.unit || 'Score');
+
+    // ECI-specific reference annotations (only show for ECI benchmark)
+    const eciAnnotations = appState.currentBenchmark === 'eci' ? [
+        {
+            x: 1,
+            y: 130,
+            xref: 'paper',
+            yref: 'y',
+            text: 'Claude 3.5 Sonnet (130)',
+            showarrow: false,
+            xanchor: 'right',
+            yanchor: 'bottom',
+            font: { size: 10, color: '#888' }
+        },
+        {
+            x: 1,
+            y: 150,
+            xref: 'paper',
+            yref: 'y',
+            text: 'GPT-5 (150)',
+            showarrow: false,
+            xanchor: 'right',
+            yanchor: 'bottom',
+            font: { size: 10, color: '#888' }
+        }
+    ] : [];
+
     const layout = {
         title: { text: '', font: { size: 16 } },
         margin: { l: 60, r: 60, t: 40, b: 60 },
         height: 500,
         xaxis: { title: 'Model Release Date' },
-        yaxis: { title: 'ECI Score' },
+        yaxis: { title: yAxisTitle },
         annotations: [
             ...annotations,
-            {
-                x: 1,
-                y: 130,
-                xref: 'paper',
-                yref: 'y',
-                text: 'Claude 3.5 Sonnet (130)',
-                showarrow: false,
-                xanchor: 'right',
-                yanchor: 'bottom',
-                font: { size: 10, color: '#888' }
-            },
-            {
-                x: 1,
-                y: 150,
-                xref: 'paper',
-                yref: 'y',
-                text: 'GPT-5 (150)',
-                showarrow: false,
-                xanchor: 'right',
-                yanchor: 'bottom',
-                font: { size: 10, color: '#888' }
-            }
+            ...eciAnnotations
         ],
         shapes: [
-            {
-                type: 'line',
-                y0: 130,
-                y1: 130,
-                x0: 0,
-                x1: 1,
-                xref: 'paper',
-                line: {
-                    color: 'rgba(150, 150, 150, 0.4)',
-                    width: 1,
-                    dash: 'dot'
+            // ECI-specific reference lines (only for ECI benchmark)
+            ...(appState.currentBenchmark === 'eci' ? [
+                {
+                    type: 'line',
+                    y0: 130,
+                    y1: 130,
+                    x0: 0,
+                    x1: 1,
+                    xref: 'paper',
+                    line: {
+                        color: 'rgba(150, 150, 150, 0.4)',
+                        width: 1,
+                        dash: 'dot'
+                    }
+                },
+                {
+                    type: 'line',
+                    y0: 150,
+                    y1: 150,
+                    x0: 0,
+                    x1: 1,
+                    xref: 'paper',
+                    line: {
+                        color: 'rgba(150, 150, 150, 0.4)',
+                        width: 1,
+                        dash: 'dot'
+                    }
                 }
-            },
-            {
-                type: 'line',
-                y0: 150,
-                y1: 150,
-                x0: 0,
-                x1: 1,
-                xref: 'paper',
-                line: {
-                    color: 'rgba(150, 150, 150, 0.4)',
-                    width: 1,
-                    dash: 'dot'
-                }
-            },
+            ] : []),
+            // Today marker (always show)
             {
                 type: 'line',
                 x0: today,
@@ -620,8 +807,15 @@ function renderTrendChart(data) {
  * Style: Only show closed models and the specific open models that matched them
  */
 function renderChart(data) {
-    const { models, gaps, statistics } = data;
+    const { models, gaps, statistics, metadata } = data;
     const labels = getFramingLabels();
+    const scoreField = getScoreField();
+    const scoreName = metadata?.unit || (appState.currentBenchmark === 'eci' ? 'ECI' : 'Score');
+
+    // Helper to get score from model or gap
+    const getModelScore = (m) => m[scoreField] ?? m.eci ?? m.score;
+    const getGapClosedScore = (g) => g.closed_eci ?? g.closed_score;
+    const getGapOpenScore = (g) => g.open_eci ?? g.open_score;
 
     // Create traces
     const traces = [];
@@ -629,7 +823,7 @@ function renderChart(data) {
     const shapes = [];
 
     // Get closed models from gaps data
-    const closedModels = models.filter(m => !m.is_open && m.date && m.eci);
+    const closedModels = models.filter(m => !m.is_open && m.date && getModelScore(m));
 
     // Matched closed models (solid red circles)
     const matchedClosed = closedModels.filter(m =>
@@ -639,7 +833,7 @@ function renderChart(data) {
     if (matchedClosed.length > 0) {
         traces.push({
             x: matchedClosed.map(m => m.date),
-            y: matchedClosed.map(m => m.eci),
+            y: matchedClosed.map(m => getModelScore(m)),
             mode: 'markers',
             type: 'scatter',
             name: labels.closedModel,
@@ -648,7 +842,7 @@ function renderChart(data) {
                 size: 12,
                 symbol: 'circle',
             },
-            hovertemplate: '<b>%{text}</b><br>ECI: %{y:.1f}<br>Date: %{x}<extra></extra>',
+            hovertemplate: `<b>%{text}</b><br>${scoreName}: %{y:.1f}<br>Date: %{x}<extra></extra>`,
             text: matchedClosed.map(m => m.display_name || m.model),
         });
     }
@@ -666,19 +860,20 @@ function renderChart(data) {
 
         const hoverTexts = unmatchedClosed.map(m => {
             const name = m.display_name || m.model;
+            const score = getModelScore(m);
             if (!hasCIData) {
-                return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
+                return `<b>${name}</b><br>${scoreName}: ${score?.toFixed(1) || 'N/A'}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
             }
             const releaseDate = new Date(m.date).getTime();
             const expectedLow = new Date(releaseDate + ciLowMs);
             const expectedHigh = new Date(releaseDate + ciHighMs);
             const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-            return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
+            return `<b>${name}</b><br>${scoreName}: ${score?.toFixed(1) || 'N/A'}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
         });
 
         traces.push({
             x: unmatchedClosed.map(m => m.date),
-            y: unmatchedClosed.map(m => m.eci),
+            y: unmatchedClosed.map(m => getModelScore(m)),
             mode: 'markers',
             type: 'scatter',
             name: `${labels.closedModel} (unmatched)`,
@@ -694,13 +889,13 @@ function renderChart(data) {
     }
 
     // Only show open models that matched a closed model (blue squares)
-    // Position them at the END of the connector line (at closed model's ECI level)
+    // Position them at the END of the connector line (at closed model's score level)
     const matchedGaps = gaps.filter(g => g.matched);
 
     if (matchedGaps.length > 0) {
         traces.push({
             x: matchedGaps.map(g => g.open_date),
-            y: matchedGaps.map(g => g.closed_eci),  // Position at closed model's ECI to align with connector line
+            y: matchedGaps.map(g => getGapClosedScore(g)),  // Position at closed model's score to align with connector line
             mode: 'markers',
             type: 'scatter',
             name: labels.openModel,
@@ -710,7 +905,7 @@ function renderChart(data) {
                 symbol: 'square',
             },
             hovertemplate: matchedGaps.map(g =>
-                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} (matched ${g.closed_eci.toFixed(1)})<br>Date: %{x}<extra></extra>`
+                `<b>${g.open_model}</b><br>${scoreName}: ${getGapOpenScore(g)?.toFixed(1)} (matched ${getGapClosedScore(g)?.toFixed(1)})<br>Date: %{x}<extra></extra>`
             ),
         });
     }
@@ -720,14 +915,15 @@ function renderChart(data) {
         const closedDate = new Date(gap.closed_date);
         const openDate = new Date(gap.open_date);
         const midDate = new Date((closedDate.getTime() + openDate.getTime()) / 2);
+        const closedScore = getGapClosedScore(gap);
 
         // Horizontal connector line
         shapes.push({
             type: 'line',
             x0: gap.closed_date,
             x1: gap.open_date,
-            y0: gap.closed_eci,
-            y1: gap.closed_eci,
+            y0: closedScore,
+            y1: closedScore,
             line: {
                 color: COLORS.connector,
                 width: 2,
@@ -737,7 +933,7 @@ function renderChart(data) {
         // Gap annotation above the line
         annotations.push({
             x: midDate.toISOString().split('T')[0],
-            y: gap.closed_eci,
+            y: closedScore,
             text: `${gap.gap_months} mo`,
             showarrow: false,
             font: {
@@ -750,43 +946,47 @@ function renderChart(data) {
 
     // Add dashed extensions for unmatched closed models
     const today = new Date().toISOString().split('T')[0];
-    // Base shapes
-    shapes.push(
-        {
-            type: 'line',
-            y0: 130,
-            y1: 130,
-            x0: 0,
-            x1: 1,
-            xref: 'paper',
-            line: {
-                color: 'rgba(150, 150, 150, 0.4)',
-                width: 1,
-                dash: 'dot'
+
+    // ECI-specific reference lines (only for ECI benchmark)
+    if (appState.currentBenchmark === 'eci') {
+        shapes.push(
+            {
+                type: 'line',
+                y0: 130,
+                y1: 130,
+                x0: 0,
+                x1: 1,
+                xref: 'paper',
+                line: {
+                    color: 'rgba(150, 150, 150, 0.4)',
+                    width: 1,
+                    dash: 'dot'
+                }
+            },
+            {
+                type: 'line',
+                y0: 150,
+                y1: 150,
+                x0: 0,
+                x1: 1,
+                xref: 'paper',
+                line: {
+                    color: 'rgba(150, 150, 150, 0.4)',
+                    width: 1,
+                    dash: 'dot'
+                }
             }
-        },
-        {
-            type: 'line',
-            y0: 150,
-            y1: 150,
-            x0: 0,
-            x1: 1,
-            xref: 'paper',
-            line: {
-                color: 'rgba(150, 150, 150, 0.4)',
-                width: 1,
-                dash: 'dot'
-            }
-        }
-    );
+        );
+    }
 
     gaps.filter(g => !g.matched).forEach(gap => {
+        const closedScore = getGapClosedScore(gap);
         shapes.push({
             type: 'line',
             x0: gap.closed_date,
             x1: today,
-            y0: gap.closed_eci,
-            y1: gap.closed_eci,
+            y0: closedScore,
+            y1: closedScore,
             line: {
                 color: COLORS.closedUnmatched,
                 width: 2,
@@ -797,7 +997,7 @@ function renderChart(data) {
         // Annotation for unmatched
         annotations.push({
             x: today,
-            y: gap.closed_eci,
+            y: closedScore,
             text: `${gap.gap_months} mo`,
             showarrow: false,
             font: {
@@ -841,31 +1041,36 @@ function renderChart(data) {
         yshift: 10,
     });
 
-    // Labels for reference lines
-    annotations.push(
-        {
-            x: 1,
-            y: 130,
-            xref: 'paper',
-            yref: 'y',
-            text: 'Claude 3.5 Sonnet (130)',
-            showarrow: false,
-            xanchor: 'right',
-            yanchor: 'bottom',
-            font: { size: 10, color: '#aaa' }
-        },
-        {
-            x: 1,
-            y: 150,
-            xref: 'paper',
-            yref: 'y',
-            text: 'GPT-5 (150)',
-            showarrow: false,
-            xanchor: 'right',
-            yanchor: 'bottom',
-            font: { size: 10, color: '#aaa' }
-        }
-    );
+    // Labels for reference lines (ECI only)
+    if (appState.currentBenchmark === 'eci') {
+        annotations.push(
+            {
+                x: 1,
+                y: 130,
+                xref: 'paper',
+                yref: 'y',
+                text: 'Claude 3.5 Sonnet (130)',
+                showarrow: false,
+                xanchor: 'right',
+                yanchor: 'bottom',
+                font: { size: 10, color: '#aaa' }
+            },
+            {
+                x: 1,
+                y: 150,
+                xref: 'paper',
+                yref: 'y',
+                text: 'GPT-5 (150)',
+                showarrow: false,
+                xanchor: 'right',
+                yanchor: 'bottom',
+                font: { size: 10, color: '#aaa' }
+            }
+        );
+    }
+
+    // Y-axis title based on benchmark
+    const chartYAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' : (metadata?.unit || 'Score');
 
     // Layout
     const layout = {
@@ -879,7 +1084,7 @@ function renderChart(data) {
             zeroline: false,
         },
         yaxis: {
-            title: 'ECI Score',
+            title: chartYAxisTitle,
             titlefont: { size: 12, color: COLORS.annotation },
             tickfont: { size: 11, color: COLORS.annotation },
             tickformat: '.0f',
@@ -1156,6 +1361,9 @@ function renderTable(models) {
     const tableBody = document.querySelector('#eci-table tbody');
     tableBody.innerHTML = '';
 
+    // Get score field for current benchmark
+    const scoreField = getScoreField();
+
     // Sort models by date descending
     const sortedModels = [...models].sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -1164,12 +1372,13 @@ function renderTable(models) {
 
         const typeClass = model.is_open ? 'type-open' : 'type-closed';
         const typeLabel = model.is_open ? 'Open' : 'Closed';
-        const eciValue = model.eci !== null ? model.eci.toFixed(1) : '-';
+        const score = model[scoreField] ?? model.eci ?? model.score;
+        const scoreValue = score !== null && score !== undefined ? score.toFixed(1) : '-';
 
         row.innerHTML = `
             <td>${model.model}</td>
             <td>${new Date(model.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}</td>
-            <td>${eciValue}</td>
+            <td>${scoreValue}</td>
             <td><span class=\"model-type ${typeClass}\">${typeLabel}</span></td>
             <td>${model.organization}</td>
         `;

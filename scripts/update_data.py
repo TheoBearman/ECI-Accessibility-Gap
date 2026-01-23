@@ -2,9 +2,10 @@
 import json
 import logging
 import math
+import os
 import sys
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,17 @@ logger = logging.getLogger(__name__)
 ECI_SCORES_URL = "https://epoch.ai/data/eci_scores.csv"
 ECI_MATCH_THRESHOLD = 1.0  # ECI points - model is "matched" if within this range
 DAYS_PER_MONTH = 30.5  # Average days per month for gap calculations
+
+# Import benchmark fetcher for additional benchmarks
+# May fail if epochai package not installed or Airtable credentials not set
+try:
+    from benchmark_fetcher import BenchmarkDataFetcher, BENCHMARK_CONFIG
+    BENCHMARK_FETCHER_AVAILABLE = True
+except Exception as e:
+    # Catches ImportError (package missing) and EnvError (credentials missing)
+    BENCHMARK_FETCHER_AVAILABLE = False
+    BENCHMARK_CONFIG = {}
+    print(f"Note: Additional benchmarks unavailable ({type(e).__name__}: {e})")
 
 def get_rank(
     df: pd.DataFrame,
@@ -65,8 +77,21 @@ def fetch_eci_data() -> pd.DataFrame:
         logger.error(f"Failed to fetch data: {e}")
         raise
 
-def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
-    """Calculate horizontal gaps."""
+def calculate_horizontal_gaps(
+    df: pd.DataFrame,
+    score_col: str = "eci",
+    threshold: float = ECI_MATCH_THRESHOLD,
+    model_col: str = "Model"
+) -> list[dict]:
+    """
+    Calculate horizontal gaps between closed and open models.
+
+    Args:
+        df: DataFrame with model data
+        score_col: Column name for the score/metric
+        threshold: Gap matching threshold
+        model_col: Column name for model identifier
+    """
     if len(df) == 0:
         return []
 
@@ -76,23 +101,23 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
     gaps = []
 
     for _, closed_row in df_closed.iterrows():
-        closed_eci = closed_row["eci"]
+        closed_score = closed_row[score_col]
         closed_date = closed_row["date"]
 
-        if pd.isna(closed_eci) or pd.isna(closed_date):
+        if pd.isna(closed_score) or pd.isna(closed_date):
             continue
 
         matching_open = None
         match_type = None
         for _, open_row in df_open.iterrows():
-            if pd.isna(open_row["eci"]) or pd.isna(open_row["date"]):
+            if pd.isna(open_row[score_col]) or pd.isna(open_row["date"]):
                 continue
 
             if open_row["date"] <= closed_date:
                 continue
 
             # Match if open model is within threshold of closed model
-            if open_row["eci"] >= closed_eci - ECI_MATCH_THRESHOLD:
+            if open_row[score_col] >= closed_score - threshold:
                 matching_open = open_row
                 match_type = "exact"
                 break
@@ -102,12 +127,12 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
             gap_months = gap_days / DAYS_PER_MONTH
 
             gaps.append({
-                "closed_model": closed_row.get("Model", "Unknown"),
+                "closed_model": closed_row.get(model_col, closed_row.get("model", "Unknown")),
                 "closed_date": closed_date.isoformat(),
-                "closed_eci": float(closed_eci),
-                "open_model": matching_open.get("Model", "Unknown"),
+                "closed_score": float(closed_score),
+                "open_model": matching_open.get(model_col, matching_open.get("model", "Unknown")),
                 "open_date": matching_open["date"].isoformat(),
-                "open_eci": float(matching_open["eci"]),
+                "open_score": float(matching_open[score_col]),
                 "gap_months": round(gap_months, 1),
                 "matched": True,
                 "match_type": match_type,
@@ -118,12 +143,12 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
             gap_months = gap_days / DAYS_PER_MONTH
 
             gaps.append({
-                "closed_model": closed_row.get("Model", "Unknown"),
+                "closed_model": closed_row.get(model_col, closed_row.get("model", "Unknown")),
                 "closed_date": closed_date.isoformat(),
-                "closed_eci": float(closed_eci),
+                "closed_score": float(closed_score),
                 "open_model": None,
                 "open_date": None,
-                "open_eci": None,
+                "open_score": None,
                 "gap_months": round(gap_months, 1),
                 "matched": False,
             })
@@ -324,20 +349,25 @@ def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float]) -> 
     }
 
 
-def calculate_historical_gaps(df: pd.DataFrame) -> list[dict]:
+def calculate_historical_gaps(
+    df: pd.DataFrame,
+    score_col: str = "eci",
+    threshold: float = ECI_MATCH_THRESHOLD,
+    model_col: str = "Model"
+) -> list[dict]:
     """
     Calculate the gap metric at various points in history.
     This shows how the gap has evolved over time.
 
     Approach: At each point in time, calculate how far behind the open frontier
     is from the closed frontier. This is measured as:
-    - Time since the closed frontier first achieved its current ECI level
-      minus time since the open frontier achieved its current ECI level
+    - Time since the closed frontier first achieved its current score level
+      minus time since the open frontier achieved its current score level
 
     Simpler approach: Find when the best open model was released, and when
-    a closed model first achieved that ECI level. The gap is the time difference.
+    a closed model first achieved that score level. The gap is the time difference.
     """
-    df = df.dropna(subset=["date", "eci"]).copy()
+    df = df.dropna(subset=["date", score_col]).copy()
     df = df.sort_values("date")
 
     if len(df) < 2:
@@ -364,16 +394,16 @@ def calculate_historical_gaps(df: pd.DataFrame) -> list[dict]:
             continue
 
         # Find the best open model at this time
-        best_open = df_open.loc[df_open["eci"].idxmax()]
-        best_open_eci = best_open["eci"]
+        best_open = df_open.loc[df_open[score_col].idxmax()]
+        best_open_score = best_open[score_col]
         best_open_date = best_open["date"]
 
         # Find the best closed model at this time
-        best_closed = df_closed.loc[df_closed["eci"].idxmax()]
-        best_closed_eci = best_closed["eci"]
+        best_closed = df_closed.loc[df_closed[score_col].idxmax()]
+        best_closed_score = best_closed[score_col]
 
-        # Find the first closed model to achieve the best open's ECI level
-        closed_at_open_level = df_closed[df_closed["eci"] >= best_open_eci - ECI_MATCH_THRESHOLD].sort_values("date")
+        # Find the first closed model to achieve the best open's score level
+        closed_at_open_level = df_closed[df_closed[score_col] >= best_open_score - threshold].sort_values("date")
 
         if len(closed_at_open_level) > 0:
             first_closed_at_level = closed_at_open_level.iloc[0]
@@ -385,7 +415,7 @@ def calculate_historical_gaps(df: pd.DataFrame) -> list[dict]:
             gap_months = max(0, gap_months)
 
             # Determine if the frontier is "matched" (open has caught up to closed frontier)
-            is_matched = best_open_eci >= best_closed_eci - ECI_MATCH_THRESHOLD
+            is_matched = best_open_score >= best_closed_score - threshold
         else:
             # No closed model at this level yet (open is ahead - very rare)
             gap_months = 0
@@ -395,10 +425,10 @@ def calculate_historical_gaps(df: pd.DataFrame) -> list[dict]:
             "date": current.isoformat(),
             "gap_months": round(float(gap_months), 1),
             "matched": bool(is_matched),
-            "reference_model": best_closed.get("Model", "Unknown"),
-            "reference_eci": round(float(best_closed_eci), 1),
-            "open_frontier_model": best_open.get("Model", "Unknown"),
-            "open_frontier_eci": round(float(best_open_eci), 1),
+            "reference_model": best_closed.get(model_col, best_closed.get("model", "Unknown")),
+            "reference_score": round(float(best_closed_score), 1),
+            "open_frontier_model": best_open.get(model_col, best_open.get("model", "Unknown")),
+            "open_frontier_score": round(float(best_open_score), 1),
         })
 
         current += pd.DateOffset(months=1)
@@ -406,7 +436,11 @@ def calculate_historical_gaps(df: pd.DataFrame) -> list[dict]:
     return historical_gaps
 
 
-def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
+def calculate_statistics(
+    df: pd.DataFrame,
+    gaps: list[dict],
+    score_col: str = "eci"
+) -> dict:
     """Calculate summary statistics."""
     df_open = df[df["Open"]].copy()
     df_closed = df[~df["Open"]].copy()
@@ -428,26 +462,24 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
             },
         }
 
-    # Use max of minimums to start from the ECI level where reference models first appear.
-    # E.g., if open models start at ECI 109 but closed models start at ECI 126, we begin
-    # sampling at 126 - below that there are no closed models to "catch up to".
-    start_eci = max(df_open["eci"].min(), df_closed["eci"].min())
-    end_eci = max(df_open["eci"].max(), df_closed["eci"].max())
+    # Use max of minimums to start from the score level where reference models first appear.
+    start_score = max(df_open[score_col].min(), df_closed[score_col].min())
+    end_score = max(df_open[score_col].max(), df_closed[score_col].max())
 
     horizontal_gaps = []
     df_open_possible = df_open.sort_values("date").copy()
 
-    for cur_eci in np.linspace(start_eci, end_eci, 100):
-        closed_candidates = df_closed[df_closed["eci"] >= cur_eci].sort_values("date")
+    for cur_score in np.linspace(start_score, end_score, 100):
+        closed_candidates = df_closed[df_closed[score_col] >= cur_score].sort_values("date")
         if len(closed_candidates) == 0:
             continue
         cur_closed_model = closed_candidates.iloc[0]
 
         cur_open_model = None
         for _, row in df_open_possible.iterrows():
-            if pd.isna(row["eci"]) or pd.isna(row["date"]):
+            if pd.isna(row[score_col]) or pd.isna(row["date"]):
                 continue
-            if row["eci"] >= cur_eci:
+            if row[score_col] >= cur_score:
                 cur_open_model = row
                 gap = (cur_open_model["date"] - cur_closed_model["date"]).days / 30.5
                 horizontal_gaps.append(gap)
@@ -466,9 +498,9 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
     else:
         avg_gap = std_gap = ci_low = ci_high = 0
 
-    best_open_eci = df_open["eci"].max() if len(df_open) > 0 else 0
-    best_closed_eci = df_closed["eci"].max() if len(df_closed) > 0 else 0
-    vertical_gap = best_closed_eci - best_open_eci
+    best_open_score = df_open[score_col].max() if len(df_open) > 0 else 0
+    best_closed_score = df_closed[score_col].max() if len(df_closed) > 0 else 0
+    vertical_gap = best_closed_score - best_open_score
 
     matched_gaps = [g for g in gaps if g["matched"]]
     matched_gaps_months = [g["gap_months"] for g in matched_gaps]
@@ -589,12 +621,21 @@ def process_data() -> dict[str, Any]:
             "is_china": bool(row.get("is_china", False)),
         })
 
-    gaps = calculate_horizontal_gaps(df_frontier)
-    stats = calculate_statistics(df_frontier, gaps)
+    gaps = calculate_horizontal_gaps(df_frontier, score_col="eci", threshold=ECI_MATCH_THRESHOLD, model_col="Model")
+    # Rename score fields to eci for backward compatibility
+    for gap in gaps:
+        gap["closed_eci"] = gap.pop("closed_score")
+        gap["open_eci"] = gap.pop("open_score")
+
+    stats = calculate_statistics(df_frontier, gaps, score_col="eci")
     trends = calculate_trends(df_all_valid)
 
     # Calculate historical gaps for the timeline chart
-    historical_gaps = calculate_historical_gaps(df_frontier)
+    historical_gaps = calculate_historical_gaps(df_frontier, score_col="eci", threshold=ECI_MATCH_THRESHOLD, model_col="Model")
+    # Rename score fields to eci for backward compatibility
+    for hg in historical_gaps:
+        hg["reference_eci"] = hg.pop("reference_score")
+        hg["open_frontier_eci"] = hg.pop("open_frontier_score")
 
     # Also calculate gaps using China vs US framing
     # Filter to only China and US models
@@ -610,9 +651,17 @@ def process_data() -> dict[str, Any]:
         df_china_us_combined = pd.concat([df_china_models, df_us_models]).sort_values("date")
         df_china_us_frontier = df_china_us_combined[df_china_us_combined["group_rank"] <= 1].copy()
 
-        china_gaps = calculate_horizontal_gaps(df_china_us_frontier)
-        china_stats = calculate_statistics(df_china_us_frontier, china_gaps)
-        china_historical = calculate_historical_gaps(df_china_us_frontier)
+        china_gaps = calculate_horizontal_gaps(df_china_us_frontier, score_col="eci", threshold=ECI_MATCH_THRESHOLD, model_col="Model")
+        for gap in china_gaps:
+            gap["closed_eci"] = gap.pop("closed_score")
+            gap["open_eci"] = gap.pop("open_score")
+
+        china_stats = calculate_statistics(df_china_us_frontier, china_gaps, score_col="eci")
+
+        china_historical = calculate_historical_gaps(df_china_us_frontier, score_col="eci", threshold=ECI_MATCH_THRESHOLD, model_col="Model")
+        for hg in china_historical:
+            hg["reference_eci"] = hg.pop("reference_score")
+            hg["open_frontier_eci"] = hg.pop("open_frontier_score")
     else:
         china_gaps = []
         china_stats = {}
@@ -633,14 +682,192 @@ def process_data() -> dict[str, Any]:
         "last_updated": datetime.now().isoformat(),
     }
 
+def process_benchmark_data(benchmark_id: str, benchmark_data: dict) -> Optional[dict]:
+    """
+    Process benchmark data from Airtable into the same format as ECI.
+
+    Args:
+        benchmark_id: The benchmark identifier (e.g., "gpqa_diamond")
+        benchmark_data: Data from BenchmarkDataFetcher.fetch_benchmark_data()
+
+    Returns:
+        Processed benchmark data with gaps, statistics, etc.
+    """
+    if not benchmark_data or not benchmark_data.get("models"):
+        logger.warning(f"No data for benchmark {benchmark_id}")
+        return None
+
+    models = benchmark_data["models"]
+    metadata = benchmark_data["metadata"]
+    threshold = metadata.get("threshold", 1.0)
+
+    logger.info(f"Processing {metadata['name']} with {len(models)} models...")
+
+    # Convert to DataFrame for processing
+    df = pd.DataFrame(models)
+    df["date"] = pd.to_datetime(df["date"])
+    df["Open"] = df["is_open"]
+
+    # Rename score column to match ECI pipeline expectations
+    df["score"] = df["score"]
+    df["score_std"] = df.get("score_std", pd.NA)
+
+    # Get ranks for each group
+    df_open = df[df["Open"]].copy()
+    df_closed = df[~df["Open"]].copy()
+
+    if len(df_open) == 0 or len(df_closed) == 0:
+        logger.warning(f"Insufficient data for {benchmark_id}: {len(df_open)} open, {len(df_closed)} closed")
+        return None
+
+    df_open["group_rank"] = get_rank(df_open, sort_col="date", val_col="score")
+    df_closed["group_rank"] = get_rank(df_closed, sort_col="date", val_col="score")
+
+    df_combined = pd.concat([df_open, df_closed]).sort_values("date")
+    df_frontier = df_combined[df_combined["group_rank"] <= 1].copy()
+
+    # Build model list for output
+    output_models = []
+    for _, row in df_frontier.iterrows():
+        output_models.append({
+            "model": row.get("model", "Unknown"),
+            "display_name": row.get("display_name", row.get("model", "Unknown")),
+            "score": float(row["score"]) if pd.notna(row["score"]) else None,
+            "score_std": float(row["score_std"]) if pd.notna(row.get("score_std")) else None,
+            "date": row["date"].isoformat() if pd.notna(row["date"]) else None,
+            "organization": row.get("organization", "Unknown"),
+            "is_open": bool(row["Open"]),
+            "is_china": bool(row.get("is_china", False)),
+        })
+
+    # Calculate gaps
+    gaps = calculate_horizontal_gaps(
+        df_frontier,
+        score_col="score",
+        threshold=threshold,
+        model_col="model"
+    )
+
+    # Calculate statistics
+    stats = calculate_statistics(df_frontier, gaps, score_col="score")
+
+    # Calculate historical gaps
+    historical_gaps = calculate_historical_gaps(
+        df_frontier,
+        score_col="score",
+        threshold=threshold,
+        model_col="model"
+    )
+
+    # Build trend models (all models, not just frontier)
+    trend_models = []
+    for _, row in df_combined.iterrows():
+        if pd.isna(row["score"]) or pd.isna(row["date"]):
+            continue
+        trend_models.append({
+            "model": row.get("model", "Unknown"),
+            "display_name": row.get("display_name", row.get("model", "Unknown")),
+            "score": float(row["score"]),
+            "score_std": float(row["score_std"]) if pd.notna(row.get("score_std")) else None,
+            "date": row["date"].isoformat(),
+            "organization": row.get("organization", "Unknown"),
+            "is_open": bool(row["Open"]),
+            "is_china": bool(row.get("is_china", False)),
+        })
+
+    # Calculate trends
+    trends = calculate_trends(df_combined.rename(columns={"score": "eci"}))
+
+    return {
+        "metadata": metadata,
+        "models": output_models,
+        "trend_models": trend_models,
+        "gaps": gaps,
+        "statistics": stats,
+        "trends": trends,
+        "historical_gaps": historical_gaps,
+    }
+
+
+def process_all_benchmarks() -> dict:
+    """Process all available benchmarks including ECI and Airtable benchmarks."""
+    benchmarks = {}
+
+    # Process ECI (always available)
+    logger.info("Processing ECI benchmark...")
+    eci_data = process_data()
+
+    # Convert ECI data to benchmark format (for consistency)
+    benchmarks["eci"] = {
+        "metadata": {
+            "id": "eci",
+            "name": "Epoch Capabilities Index (ECI)",
+            "description": "Comprehensive AI capability index from Epoch AI",
+            "unit": "ECI Score",
+            "threshold": ECI_MATCH_THRESHOLD,
+            "scale": 1,
+        },
+        "models": eci_data["models"],
+        "trend_models": eci_data["trend_models"],
+        "gaps": eci_data["gaps"],
+        "statistics": eci_data["statistics"],
+        "trends": eci_data["trends"],
+        "historical_gaps": eci_data["historical_gaps"],
+        "china_framing": eci_data["china_framing"],
+    }
+
+    # Process additional benchmarks from Airtable if available
+    if BENCHMARK_FETCHER_AVAILABLE:
+        logger.info("Fetching additional benchmarks from Epoch AI Airtable...")
+        try:
+            fetcher = BenchmarkDataFetcher()
+
+            # Process each configured benchmark
+            for benchmark_id in BENCHMARK_CONFIG.keys():
+                try:
+                    logger.info(f"Fetching {benchmark_id}...")
+                    raw_data = fetcher.fetch_benchmark_data(benchmark_id)
+                    if raw_data:
+                        processed = process_benchmark_data(benchmark_id, raw_data)
+                        if processed:
+                            benchmarks[benchmark_id] = processed
+                            logger.info(f"  Successfully processed {benchmark_id}")
+                        else:
+                            logger.warning(f"  Skipped {benchmark_id} (insufficient data)")
+                except Exception as e:
+                    logger.error(f"  Error processing {benchmark_id}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to initialize benchmark fetcher: {e}")
+    else:
+        logger.warning("Benchmark fetcher not available - only ECI will be processed")
+
+    return {
+        "benchmarks": benchmarks,
+        "default_benchmark": "eci",
+        "last_updated": datetime.now().isoformat(),
+    }
+
+
 def main():
     try:
-        data = process_data()
+        # Process all benchmarks
+        data = process_all_benchmarks()
+
+        # Write the new multi-benchmark format
         with open("data.json", "w") as f:
             json.dump(data, f, indent=2)
-        logger.info("Successfully wrote data.json")
+        logger.info(f"Successfully wrote data.json with {len(data['benchmarks'])} benchmarks")
+
+        # List processed benchmarks
+        for bid, bdata in data["benchmarks"].items():
+            name = bdata.get("metadata", {}).get("name", bid)
+            model_count = len(bdata.get("models", []))
+            logger.info(f"  - {name}: {model_count} frontier models")
+
     except Exception as e:
         logger.error(f"Failed to process data: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
