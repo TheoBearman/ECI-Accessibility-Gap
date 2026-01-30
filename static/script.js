@@ -21,13 +21,24 @@ const COLORS = {
  * Simple linear regression calculation
  * Returns slope (per year), intercept, and helper to predict values
  */
-function linearRegression(dates, scores) {
+function linearRegression(dates, scores, useLog = false) {
     if (dates.length < 2) return null;
 
+    // Filter out non-positive scores if using log
+    let filteredDates = dates;
+    let filteredScores = scores;
+    if (useLog) {
+        const valid = scores.map((s, i) => [s, i]).filter(([s]) => s > 0);
+        if (valid.length < 2) return null;
+        filteredDates = valid.map(([, i]) => dates[i]);
+        filteredScores = valid.map(([s]) => s);
+    }
+
     // Convert dates to numeric (days since first date)
-    const firstDate = new Date(dates[0]).getTime();
-    const x = dates.map(d => (new Date(d).getTime() - firstDate) / (1000 * 60 * 60 * 24));
-    const y = scores;
+    const firstDate = new Date(filteredDates[0]).getTime();
+    const x = filteredDates.map(d => (new Date(d).getTime() - firstDate) / (1000 * 60 * 60 * 24));
+    // For log mode, regress on ln(score) so the line is straight on a log axis
+    const y = useLog ? filteredScores.map(s => Math.log(s)) : filteredScores;
 
     const n = x.length;
     const sumX = x.reduce((a, b) => a + b, 0);
@@ -45,14 +56,17 @@ function linearRegression(dates, scores) {
     const slopePerYear = slope * 365;
 
     return {
-        slope: slopePerYear,
+        slope: useLog ? Math.exp(slopePerYear) : slopePerYear, // For log: multiplicative factor per year
+        slopeRaw: slopePerYear,
         intercept,
+        useLog,
         predict: (date) => {
             const daysSinceFirst = (new Date(date).getTime() - firstDate) / (1000 * 60 * 60 * 24);
-            return intercept + slope * daysSinceFirst;
+            const val = intercept + slope * daysSinceFirst;
+            return useLog ? Math.exp(val) : val;
         },
-        startDate: dates[0],
-        endDate: dates[dates.length - 1]
+        startDate: filteredDates[0],
+        endDate: filteredDates[filteredDates.length - 1]
     };
 }
 
@@ -675,11 +689,12 @@ function renderTrendChart(data) {
     });
 
     // Calculate trend lines for each category
+    // For METR (log-scale axis), use log-linear regression so the trend line is straight
     const cat1Regression = category1Models.length >= 3
-        ? linearRegression(category1Models.map(m => m.date), category1Models.map(m => getScore(m)))
+        ? linearRegression(category1Models.map(m => m.date), category1Models.map(m => getScore(m)), isTrendMetr)
         : null;
     const cat2Regression = category2Models.length >= 3
-        ? linearRegression(category2Models.map(m => m.date), category2Models.map(m => getScore(m)))
+        ? linearRegression(category2Models.map(m => m.date), category2Models.map(m => getScore(m)), isTrendMetr)
         : null;
 
     // Track which annotations belong to which trend lines
@@ -687,12 +702,19 @@ function renderTrendChart(data) {
 
     // Add trend line for category 1
     if (cat1Regression) {
-        const startY = cat1Regression.predict(cat1Regression.startDate);
-        const endY = cat1Regression.predict(cat1Regression.endDate);
+        // For log-scale regression, generate multiple points so the line renders
+        // as a straight line on the log axis (Plotly draws linear segments between points)
+        const nPts = cat1Regression.useLog ? 20 : 2;
+        const t0 = new Date(cat1Regression.startDate).getTime();
+        const t1 = new Date(cat1Regression.endDate).getTime();
+        const trendXs = Array.from({length: nPts}, (_, i) => new Date(t0 + (t1 - t0) * i / (nPts - 1)).toISOString().split('T')[0]);
+        const trendYs = trendXs.map(d => cat1Regression.predict(d));
+        const startY = trendYs[0];
+        const endY = trendYs[trendYs.length - 1];
         const trendName = `${cat1Name} Trend`;
         traces.push({
-            x: [cat1Regression.startDate, cat1Regression.endDate],
-            y: [startY, endY],
+            x: trendXs,
+            y: trendYs,
             mode: 'lines',
             type: 'scatter',
             name: trendName,
@@ -700,12 +722,14 @@ function renderTrendChart(data) {
         });
 
         // Annotation for category 1 trend
-        const growthRate = cat1Regression.slope.toFixed(1);
+        const growthText = cat1Regression.useLog
+            ? `${cat1Regression.slope.toFixed(1)}x/year`
+            : `+${cat1Regression.slope.toFixed(1)} ${unitName}/year`;
         trendAnnotationMap[trendName] = annotations.length; // Track annotation index
         annotations.push({
             x: cat1Regression.endDate,
             y: endY,
-            text: `<b>${cat1Name} Growth</b><br>+${growthRate} ${unitName}/year`,
+            text: `<b>${cat1Name} Growth</b><br>${growthText}`,
             showarrow: true,
             arrowhead: 2,
             ax: -100,
@@ -722,12 +746,17 @@ function renderTrendChart(data) {
 
     // Add trend line for category 2
     if (cat2Regression) {
-        const startY = cat2Regression.predict(cat2Regression.startDate);
-        const endY = cat2Regression.predict(cat2Regression.endDate);
+        const nPts2 = cat2Regression.useLog ? 20 : 2;
+        const t0_2 = new Date(cat2Regression.startDate).getTime();
+        const t1_2 = new Date(cat2Regression.endDate).getTime();
+        const trendXs2 = Array.from({length: nPts2}, (_, i) => new Date(t0_2 + (t1_2 - t0_2) * i / (nPts2 - 1)).toISOString().split('T')[0]);
+        const trendYs2 = trendXs2.map(d => cat2Regression.predict(d));
+        const startY = trendYs2[0];
+        const endY = trendYs2[trendYs2.length - 1];
         const trendName = `${cat2Name} Trend`;
         traces.push({
-            x: [cat2Regression.startDate, cat2Regression.endDate],
-            y: [startY, endY],
+            x: trendXs2,
+            y: trendYs2,
             mode: 'lines',
             type: 'scatter',
             name: trendName,
@@ -735,8 +764,10 @@ function renderTrendChart(data) {
         });
 
         // Annotation for category 2 trend with comparison
-        const growthRate = cat2Regression.slope.toFixed(1);
-        let annotationText = `<b>${cat2Name} Growth</b><br>+${growthRate} ${unitName}/year`;
+        const growthText2 = cat2Regression.useLog
+            ? `${cat2Regression.slope.toFixed(1)}x/year`
+            : `+${cat2Regression.slope.toFixed(1)} ${unitName}/year`;
+        let annotationText = `<b>${cat2Name} Growth</b><br>${growthText2}`;
 
         if (cat1Regression && cat1Regression.slope > 0) {
             const factor = (cat2Regression.slope / cat1Regression.slope).toFixed(1);
@@ -1070,12 +1101,13 @@ function renderChart(data) {
             x: midDate.toISOString().split('T')[0],
             y: closedScore,
             text: `${gap.gap_months} mo`,
-            showarrow: false,
+            showarrow: isMetr,
+            ...(isMetr ? { arrowhead: 0, arrowcolor: COLORS.open, ax: 0, ay: -30 } : {}),
             font: {
                 size: 11,
                 color: COLORS.open,
             },
-            yshift: 15,
+            yshift: isMetr ? 0 : 15,
         });
     });
 
