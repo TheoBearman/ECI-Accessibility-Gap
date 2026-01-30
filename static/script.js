@@ -800,6 +800,7 @@ function renderTrendChart(data) {
     const yAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' :
                        appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes)' :
                        (benchmarkMetadata?.unit || 'Score');
+    const isTrendMetr = appState.currentBenchmark === 'metr_time_horizon';
 
     // ECI-specific reference annotations (only show for ECI benchmark)
     const eciAnnotations = appState.currentBenchmark === 'eci' ? [
@@ -834,6 +835,11 @@ function renderTrendChart(data) {
         xaxis: { title: 'Model Release Date' },
         yaxis: {
             title: yAxisTitle,
+            ...(isTrendMetr ? {
+                type: 'log',
+                tickvals: [0.1, 0.5, 1, 5, 10, 50, 100, 500],
+                ticktext: ['0.1', '0.5', '1', '5', '10', '50', '100', '500'],
+            } : {}),
         },
         annotations: [
             ...annotations,
@@ -1203,6 +1209,7 @@ function renderChart(data) {
     const chartYAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' :
                             appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes)' :
                             (metadata?.unit || 'Score');
+    const isMetr = appState.currentBenchmark === 'metr_time_horizon';
 
     // Layout
     const layout = {
@@ -1219,9 +1226,16 @@ function renderChart(data) {
             title: chartYAxisTitle,
             titlefont: { size: 12, color: COLORS.annotation },
             tickfont: { size: 11, color: COLORS.annotation },
-            tickformat: '.0f',
             gridcolor: COLORS.gridline,
             zeroline: false,
+            // METR spans 0.04–320 min; log scale with explicit ticks spreads data evenly
+            ...(isMetr ? {
+                type: 'log',
+                tickvals: [0.1, 0.5, 1, 5, 10, 50, 100, 500],
+                ticktext: ['0.1', '0.5', '1', '5', '10', '50', '100', '500'],
+            } : {
+                tickformat: '.0f',
+            }),
         },
         shapes: shapes,
         annotations: annotations,
