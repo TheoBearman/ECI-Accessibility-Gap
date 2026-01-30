@@ -561,20 +561,16 @@ def calculate_statistics(
             continue
         cur_closed_model = closed_candidates.iloc[0]
 
-        cur_open_model = None
+        # Only include score levels where an open model has actually matched.
+        # Unmatched levels are censored observations — including them as
+        # time-since-release would undercount the true average gap.
         for _, row in df_open_possible.iterrows():
             if pd.isna(row[score_col]) or pd.isna(row["date"]):
                 continue
             if row[score_col] >= cur_score:
-                cur_open_model = row
-                gap = (cur_open_model["date"] - cur_closed_model["date"]).days / 30.5
+                gap = (row["date"] - cur_closed_model["date"]).days / 30.5
                 horizontal_gaps.append(gap)
                 break
-
-        if cur_open_model is None:
-            now = datetime.now()
-            gap = (now - cur_closed_model["date"].to_pydatetime().replace(tzinfo=None)).days / 30.5
-            horizontal_gaps.append(gap)
 
     if horizontal_gaps:
         avg_gap = np.mean(horizontal_gaps)
