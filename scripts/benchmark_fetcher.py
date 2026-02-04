@@ -50,11 +50,18 @@ BENCHMARK_CONFIG = {
     },
     "swe_bench_verified": {
         "name": "SWE-Bench Verified",
+        # Try multiple possible task paths (Epoch AI may use different naming conventions)
         "task_path": "bench.task.swe_bench.swe_bench_verified",
+        "alt_task_paths": [
+            "bench.task.swe-bench.swe-bench-verified",
+            "bench.task.swe_bench_verified.swe_bench_verified",
+        ],
+        "search_keywords": ["swe_bench", "swe-bench", "swebench"],  # Keywords to search for
         "unit": "Resolve Rate",
         "scale": 100,
         "threshold": 1.0,
         "scorer": "swe_bench_scorer",
+        "alt_scorers": ["resolve_rate", "pass_rate"],  # Alternative scorer names
         "description": "Software engineering bug fixing benchmark"
     },
     "simpleqa_verified": {
@@ -68,11 +75,18 @@ BENCHMARK_CONFIG = {
     },
     "frontiermath_public": {
         "name": "FrontierMath (Public)",
+        # Try multiple possible task paths (naming conventions may vary)
         "task_path": "bench.task.frontiermath.frontiermath_2025_02_28_public",
+        "alt_task_paths": [
+            "bench.task.frontiermath.frontiermath-2025-02-28-public",
+            "bench.task.frontiermath_public.frontiermath_public",
+        ],
+        "search_keywords": ["frontiermath", "frontier_math", "frontier-math"],  # Keywords to search for
         "unit": "Accuracy",
         "scale": 100,
         "threshold": 0.5,  # Lower threshold for harder benchmark
         "scorer": "verification_code",
+        "alt_scorers": ["exact_match", "accuracy"],  # Alternative scorer names
         "description": "Frontier-level mathematics problems (public subset)"
     },
     "chess_puzzles": {
@@ -138,11 +152,59 @@ class BenchmarkDataFetcher:
 
         # Build lookup dictionaries
         self._task_by_path = {t.path: t for t in self._tasks}
+        self._task_by_name = {t.name.lower(): t for t in self._tasks if t.name}
         self._model_by_id = {m.id: m for m in self._models}
         self._run_by_id = {r.id: r for r in self._runs}
 
         print(f"  Loaded {len(self._tasks)} tasks, {len(self._runs)} runs, "
               f"{len(self._models)} models, {len(self._model_groups)} model groups")
+
+    def _find_task(self, config: dict) -> Optional[object]:
+        """
+        Find a task using multiple strategies:
+        1. Exact path match
+        2. Alternative paths
+        3. Keyword search in task paths/names
+        """
+        # Strategy 1: Exact path match
+        task = self._task_by_path.get(config["task_path"])
+        if task:
+            return task
+
+        # Strategy 2: Try alternative paths
+        if "alt_task_paths" in config:
+            for alt_path in config["alt_task_paths"]:
+                task = self._task_by_path.get(alt_path)
+                if task:
+                    print(f"  Found using alternative path: {alt_path}")
+                    return task
+
+        # Strategy 3: Search by keywords in path/name
+        search_keywords = config.get("search_keywords", [])
+        if not search_keywords:
+            # Generate keywords from the benchmark name
+            name = config["name"].lower()
+            search_keywords = [
+                name.replace(" ", "_").replace("-", "_"),
+                name.replace(" ", "-").replace("_", "-"),
+                name.replace(" ", ""),
+            ]
+
+        for task_path, task in self._task_by_path.items():
+            path_lower = task_path.lower()
+            for keyword in search_keywords:
+                if keyword in path_lower:
+                    print(f"  Found via keyword search '{keyword}': {task_path}")
+                    return task
+
+        # Log available similar tasks for debugging
+        benchmark_id = config.get("name", "").lower().replace(" ", "")
+        similar = [p for p in self._task_by_path.keys()
+                   if any(kw in p.lower() for kw in benchmark_id.split("_")[:2])]
+        if similar:
+            print(f"  Similar tasks available: {similar[:3]}")
+
+        return None
 
     def get_available_benchmarks(self) -> list:
         """Return list of available benchmarks with their metadata."""
@@ -150,7 +212,7 @@ class BenchmarkDataFetcher:
 
         available = []
         for bench_id, config in BENCHMARK_CONFIG.items():
-            task = self._task_by_path.get(config["task_path"])
+            task = self._find_task(config)
             if task:
                 # Count models with scores for this benchmark
                 model_count = self._count_models_for_task(task)
@@ -163,6 +225,11 @@ class BenchmarkDataFetcher:
                 })
 
         return available
+
+    def list_all_task_paths(self) -> list:
+        """List all available task paths from Airtable for debugging."""
+        self._load_data()
+        return sorted(self._task_by_path.keys())
 
     def _count_models_for_task(self, task) -> int:
         """Count unique models evaluated on a task."""
@@ -237,10 +304,11 @@ class BenchmarkDataFetcher:
         config = BENCHMARK_CONFIG[benchmark_id]
         self._load_data()
 
-        # Find the task
-        task = self._task_by_path.get(config["task_path"])
+        # Find the task using smart search
+        print(f"Searching for {config['name']}...")
+        task = self._find_task(config)
         if not task:
-            print(f"Task not found: {config['task_path']}")
+            print(f"  Task not found for {benchmark_id}")
             return None
 
         print(f"Fetching data for {config['name']}...")
@@ -258,9 +326,14 @@ class BenchmarkDataFetcher:
 
             # Get scores for this run
             if run.scores:
+                # Build list of valid scorers (primary + alternatives)
+                valid_scorers = [config["scorer"]] if config.get("scorer") else []
+                if "alt_scorers" in config:
+                    valid_scorers.extend(config["alt_scorers"])
+
                 for score in run.scores:
                     # Filter by scorer if specified
-                    if config["scorer"] and score.scorer != config["scorer"]:
+                    if valid_scorers and score.scorer not in valid_scorers:
                         continue
 
                     model_scores[model.id].append({
