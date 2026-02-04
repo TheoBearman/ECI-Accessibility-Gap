@@ -20,16 +20,25 @@ ECI_SCORES_URL = "https://epoch.ai/data/eci_scores.csv"
 ECI_MATCH_THRESHOLD = 1.0  # ECI points - model is "matched" if within this range
 DAYS_PER_MONTH = 365.25 / 12  # 30.4375 - accurate average days per month accounting for leap years
 
-# Import benchmark fetcher for additional benchmarks
-# May fail if epochai package not installed or Airtable credentials not set
+# Import CSV-based benchmark fetcher (no credentials required)
+try:
+    from csv_benchmark_fetcher import CSVBenchmarkFetcher, BENCHMARK_CSV_CONFIG
+    CSV_FETCHER_AVAILABLE = True
+except ImportError as e:
+    CSV_FETCHER_AVAILABLE = False
+    BENCHMARK_CSV_CONFIG = {}
+    print(f"Note: CSV benchmark fetcher unavailable ({e})")
+
+# Legacy Airtable fetcher (optional, requires credentials)
 try:
     from benchmark_fetcher import BenchmarkDataFetcher, BENCHMARK_CONFIG
-    BENCHMARK_FETCHER_AVAILABLE = True
+    AIRTABLE_FETCHER_AVAILABLE = True
 except Exception as e:
-    # Catches ImportError (package missing) and EnvError (credentials missing)
-    BENCHMARK_FETCHER_AVAILABLE = False
+    AIRTABLE_FETCHER_AVAILABLE = False
     BENCHMARK_CONFIG = {}
-    print(f"Note: Additional benchmarks unavailable ({type(e).__name__}: {e})")
+    # Only log if CSV fetcher also unavailable
+    if not CSV_FETCHER_AVAILABLE:
+        print(f"Note: Airtable benchmark fetcher unavailable ({type(e).__name__}: {e})")
 
 # Import METR fetcher
 try:
@@ -1091,14 +1100,14 @@ def process_all_benchmarks() -> dict:
     else:
         logger.warning("METR fetcher not available")
 
-    # Process additional benchmarks from Airtable if available
-    if BENCHMARK_FETCHER_AVAILABLE:
-        logger.info("Fetching additional benchmarks from Epoch AI Airtable...")
+    # Process additional benchmarks from CSV exports (preferred - no credentials needed)
+    if CSV_FETCHER_AVAILABLE:
+        logger.info("Fetching additional benchmarks from Epoch AI CSV exports...")
         try:
-            fetcher = BenchmarkDataFetcher()
+            fetcher = CSVBenchmarkFetcher()
 
             # Process each configured benchmark
-            for benchmark_id in BENCHMARK_CONFIG.keys():
+            for benchmark_id in BENCHMARK_CSV_CONFIG.keys():
                 try:
                     logger.info(f"Fetching {benchmark_id}...")
                     raw_data = fetcher.fetch_benchmark_data(benchmark_id)
@@ -1112,9 +1121,36 @@ def process_all_benchmarks() -> dict:
                 except Exception as e:
                     logger.error(f"  Error processing {benchmark_id}: {e}")
         except Exception as e:
-            logger.error(f"Failed to initialize benchmark fetcher: {e}")
+            logger.error(f"Failed to fetch CSV benchmarks: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Fallback to Airtable fetcher if CSV fetcher unavailable or for additional benchmarks
+    elif AIRTABLE_FETCHER_AVAILABLE:
+        logger.info("Fetching additional benchmarks from Epoch AI Airtable...")
+        try:
+            fetcher = BenchmarkDataFetcher()
+
+            # Process each configured benchmark
+            for benchmark_id in BENCHMARK_CONFIG.keys():
+                if benchmark_id in benchmarks:
+                    continue  # Skip if already fetched from CSV
+                try:
+                    logger.info(f"Fetching {benchmark_id}...")
+                    raw_data = fetcher.fetch_benchmark_data(benchmark_id)
+                    if raw_data:
+                        processed = process_benchmark_data(benchmark_id, raw_data)
+                        if processed:
+                            benchmarks[benchmark_id] = processed
+                            logger.info(f"  Successfully processed {benchmark_id}")
+                        else:
+                            logger.warning(f"  Skipped {benchmark_id} (insufficient data)")
+                except Exception as e:
+                    logger.error(f"  Error processing {benchmark_id}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Airtable benchmark fetcher: {e}")
     else:
-        logger.warning("Benchmark fetcher not available - only ECI will be processed")
+        logger.warning("No benchmark fetcher available - only ECI and METR will be processed")
 
     return {
         "benchmarks": benchmarks,
