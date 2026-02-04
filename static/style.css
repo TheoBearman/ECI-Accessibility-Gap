@@ -150,40 +150,6 @@ body {
     max-width: 600px;
 }
 
-.title-stats {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-lg);
-    margin-top: var(--spacing-lg);
-    padding-top: var(--spacing-lg);
-    border-top: 1px solid rgba(255,255,255,0.1);
-}
-
-.title-stat {
-    display: flex;
-    flex-direction: column;
-}
-
-.title-stat-value {
-    font-size: 1.75rem;
-    font-weight: 700;
-    color: white;
-    line-height: 1;
-}
-
-.title-stat-label {
-    font-size: 0.75rem;
-    color: rgba(255,255,255,0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-top: 4px;
-}
-
-.title-stat-divider {
-    width: 1px;
-    height: 40px;
-    background: rgba(255,255,255,0.15);
-}
 
 .container {
     max-width: 1200px;
@@ -643,14 +609,6 @@ details.explainer-panel[open] .explainer-summary::before {
         font-size: 1.5rem;
     }
 
-    .title-stats {
-        gap: var(--spacing-md);
-    }
-
-    .title-stat-value {
-        font-size: 1.25rem;
-    }
-
     .header h1 {
         font-size: 1.25rem;
     }
@@ -673,15 +631,6 @@ details.explainer-panel[open] .explainer-summary::before {
         flex-direction: column;
         align-items: flex-start;
         gap: var(--spacing-sm);
-    }
-
-    .title-stats {
-        flex-wrap: wrap;
-        gap: var(--spacing-sm) var(--spacing-lg);
-    }
-
-    .title-stat-divider {
-        display: none;
     }
 
     .stats-panel {

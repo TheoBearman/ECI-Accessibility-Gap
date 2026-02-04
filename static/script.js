@@ -664,7 +664,6 @@ function renderAll() {
     renderTrendChart(currentData);
     renderHistoricalChart(currentData);
     updateDisplay();
-    updateHeaderStats();
     updateLastUpdated(currentData.last_updated);
     renderTable(currentData.trend_models || currentData.models);
 }
@@ -1590,31 +1589,6 @@ function updateStatsCurrentGap(stats) {
  */
 function updateTitle(avgGap) {
     document.getElementById('gap-value').textContent = avgGap;
-    // Also update header gap stat
-    const headerGap = document.getElementById('header-gap');
-    if (headerGap) {
-        headerGap.textContent = avgGap;
-    }
-}
-
-/**
- * Update the header statistics bar
- */
-function updateHeaderStats() {
-    // Update benchmark count
-    const benchmarkCount = document.getElementById('header-benchmarks');
-    if (benchmarkCount && appState.data?.benchmarks) {
-        benchmarkCount.textContent = Object.keys(appState.data.benchmarks).length;
-    }
-
-    // Update frontier model count for current benchmark
-    const modelCount = document.getElementById('header-models');
-    if (modelCount) {
-        const currentData = getCurrentData();
-        if (currentData?.models) {
-            modelCount.textContent = currentData.models.length;
-        }
-    }
 }
 
 /**
