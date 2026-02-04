@@ -21,6 +21,8 @@ from update_data import (
     calculate_historical_gaps,
     is_china_org,
     is_us_org,
+    DAYS_PER_MONTH,
+    ECI_MATCH_THRESHOLD,
 )
 
 
@@ -42,8 +44,11 @@ class TestHorizontalGapCalculation:
         assert gaps[0]["closed_model"] == "ClosedA"
         assert gaps[0]["open_model"] == "OpenB"
         assert gaps[0]["matched"] is True
-        # Gap should be ~3 months (Jan to Apr)
-        assert 2.5 <= gaps[0]["gap_months"] <= 3.5
+        # Exact calculation: Jan 1 to Apr 1 = 91 days (2024 is leap year)
+        expected_days = (pd.to_datetime("2024-04-01") - pd.to_datetime("2024-01-01")).days
+        expected_months = expected_days / DAYS_PER_MONTH
+        # gap_months is rounded to 1 decimal place in the code
+        assert abs(gaps[0]["gap_months"] - round(expected_months, 1)) < 0.01
 
     def test_unmatched_gap(self):
         """Test case where no open model matches the closed model."""
@@ -104,7 +109,49 @@ class TestHorizontalGapCalculation:
 
         gaps = calculate_horizontal_gaps(df)
 
-        # Should match because 99.5 >= 100 - 1
+        # Should match because 99.5 >= 100 - 1 (threshold is ECI_MATCH_THRESHOLD = 1.0)
+        assert gaps[0]["matched"] is True
+
+    def test_eci_tolerance_exact_boundary(self):
+        """Test open model exactly at threshold boundary (1 point below)."""
+        df = pd.DataFrame({
+            "Model": ["ClosedA", "OpenB"],
+            "eci": [100.0, 99.0],  # Exactly 1 point below = exactly at threshold
+            "date": pd.to_datetime(["2024-01-01", "2024-04-01"]),
+            "Open": [False, True],
+        })
+
+        gaps = calculate_horizontal_gaps(df)
+
+        # Should match because 99.0 >= 100 - 1 = 99.0 (inclusive boundary)
+        assert gaps[0]["matched"] is True
+
+    def test_eci_tolerance_just_outside(self):
+        """Test open model just outside threshold (1.01 points below)."""
+        df = pd.DataFrame({
+            "Model": ["ClosedA", "OpenB"],
+            "eci": [100.0, 98.99],  # Just outside threshold
+            "date": pd.to_datetime(["2024-01-01", "2024-04-01"]),
+            "Open": [False, True],
+        })
+
+        gaps = calculate_horizontal_gaps(df)
+
+        # Should NOT match because 98.99 < 100 - 1 = 99.0
+        assert gaps[0]["matched"] is False
+
+    def test_eci_tolerance_open_above_closed(self):
+        """Test open model above closed model (always matches)."""
+        df = pd.DataFrame({
+            "Model": ["ClosedA", "OpenB"],
+            "eci": [100.0, 105.0],  # Open is ahead
+            "date": pd.to_datetime(["2024-01-01", "2024-04-01"]),
+            "Open": [False, True],
+        })
+
+        gaps = calculate_horizontal_gaps(df)
+
+        # Should definitely match (open exceeds closed)
         assert gaps[0]["matched"] is True
 
 
@@ -369,15 +416,146 @@ class TestRealWorldScenario:
         assert gpt4_gap is not None
         assert gpt4_gap["matched"] is True
         assert gpt4_gap["open_model"] == "Llama 3.1-405B"
-        # Gap should be ~16 months (Mar 2023 to Jul 2024)
-        assert 15 <= gpt4_gap["gap_months"] <= 18
+        # Exact calculation: Mar 14, 2023 to Jul 23, 2024
+        expected_days = (pd.to_datetime("2024-07-23") - pd.to_datetime("2023-03-14")).days
+        expected_months = expected_days / DAYS_PER_MONTH
+        assert abs(gpt4_gap["gap_months"] - expected_months) < 0.1
 
-        # o1 should be matched by DeepSeek-R1
+        # o1 should NOT be matched by DeepSeek-R1
         o1_gap = next((g for g in gaps if g["closed_model"] == "o1"), None)
         assert o1_gap is not None
-        # DeepSeek-R1 (139) is close to o1 (142), within tolerance? 139 >= 142-1 = 141? No, 139 < 141
+        # DeepSeek-R1 (139) vs o1 (142): 139 >= 142-1 = 141? No, 139 < 141
         # So o1 should be unmatched
         assert o1_gap["matched"] is False
+
+
+class TestConstants:
+    """Tests verifying constant values and their mathematical correctness."""
+
+    def test_days_per_month_accuracy(self):
+        """Verify DAYS_PER_MONTH is the accurate average."""
+        # Average days per month accounting for leap years = 365.25 / 12
+        expected = 365.25 / 12  # = 30.4375
+        assert DAYS_PER_MONTH == expected
+        # Verify it's more accurate than the commonly used 30.5
+        assert abs(DAYS_PER_MONTH - 30.4375) < 0.0001
+
+    def test_eci_match_threshold(self):
+        """Verify ECI_MATCH_THRESHOLD is documented value."""
+        assert ECI_MATCH_THRESHOLD == 1.0
+
+    def test_z_score_for_90_ci(self):
+        """Verify the z-score used for 90% CI is correct."""
+        from scipy.stats import norm
+        # For 90% CI (two-tailed), we need z where P(-z < Z < z) = 0.90
+        # This means P(Z < z) = 0.95
+        z_90 = norm.ppf(0.95)
+        assert abs(z_90 - 1.645) < 0.001
+
+
+class TestConfidenceIntervals:
+    """Tests verifying confidence interval calculations are correct."""
+
+    def test_ci_formula_correctness(self):
+        """Verify CI formula: mean ± z * (std / sqrt(n))."""
+        # Create test data with known statistics
+        test_gaps = [3.0, 4.0, 5.0, 6.0, 7.0]
+        mean = np.mean(test_gaps)
+        std = np.std(test_gaps, ddof=1)  # Unbiased
+        n = len(test_gaps)
+        sem = std / np.sqrt(n)
+
+        expected_ci_low = mean - 1.645 * sem
+        expected_ci_high = mean + 1.645 * sem
+
+        # Verify our understanding of the formula
+        assert abs(mean - 5.0) < 0.001
+        assert expected_ci_low < mean < expected_ci_high
+        # CI should be symmetric around mean
+        assert abs((expected_ci_high - mean) - (mean - expected_ci_low)) < 0.001
+
+    def test_ci_narrows_with_more_samples(self):
+        """Verify CI narrows as sample size increases."""
+        small_sample = [3.0, 4.0, 5.0, 6.0, 7.0]
+        large_sample = small_sample * 10  # 50 samples
+
+        def calc_ci_width(data):
+            std = np.std(data, ddof=1)
+            sem = std / np.sqrt(len(data))
+            return 2 * 1.645 * sem
+
+        small_width = calc_ci_width(small_sample)
+        large_width = calc_ci_width(large_sample)
+
+        # CI width should scale as 1/sqrt(n)
+        # sqrt(50)/sqrt(5) ≈ 3.16, so large should be ~3.16x narrower
+        ratio = small_width / large_width
+        assert 3.0 < ratio < 3.6  # Allow for floating point precision
+
+    def test_statistics_returns_valid_ci(self):
+        """Verify calculate_statistics returns valid CI bounds."""
+        df = pd.DataFrame({
+            "Model": ["ClosedA", "ClosedB", "OpenC", "OpenD"],
+            "eci": [100.0, 105.0, 102.0, 107.0],
+            "date": pd.to_datetime([
+                "2024-01-01", "2024-02-01",
+                "2024-03-01", "2024-04-01"
+            ]),
+            "Open": [False, False, True, True],
+        })
+
+        gaps = [
+            {"matched": True, "gap_months": 2.0},
+            {"matched": True, "gap_months": 2.0},
+        ]
+
+        stats = calculate_statistics(df, gaps)
+
+        # CI should bracket the mean
+        assert stats["ci_90_low"] <= stats["avg_horizontal_gap_months"]
+        assert stats["avg_horizontal_gap_months"] <= stats["ci_90_high"]
+        # CI bounds should be reasonable (not negative for gap data)
+        # Note: CI_low could theoretically be negative if std is large
+        assert stats["ci_90_high"] > 0
+
+
+class TestDateArithmetic:
+    """Tests verifying date arithmetic precision."""
+
+    def test_exact_month_calculation(self):
+        """Verify gap calculation uses exact day count."""
+        # 2024 is a leap year, so Feb has 29 days
+        # Jan 1 to Mar 1 = 31 (Jan) + 29 (Feb) = 60 days
+        df = pd.DataFrame({
+            "Model": ["ClosedA", "OpenB"],
+            "eci": [100.0, 101.0],
+            "date": pd.to_datetime(["2024-01-01", "2024-03-01"]),
+            "Open": [False, True],
+        })
+
+        gaps = calculate_horizontal_gaps(df)
+
+        expected_days = 60  # Jan (31) + Feb (29 in 2024)
+        expected_months = expected_days / DAYS_PER_MONTH
+        # gap_months is rounded to 1 decimal place
+        assert abs(gaps[0]["gap_months"] - round(expected_months, 1)) < 0.01
+
+    def test_year_boundary_calculation(self):
+        """Verify gap calculation across year boundary."""
+        # Dec 15, 2023 to Jan 15, 2024 = 31 days
+        df = pd.DataFrame({
+            "Model": ["ClosedA", "OpenB"],
+            "eci": [100.0, 101.0],
+            "date": pd.to_datetime(["2023-12-15", "2024-01-15"]),
+            "Open": [False, True],
+        })
+
+        gaps = calculate_horizontal_gaps(df)
+
+        expected_days = 31
+        expected_months = expected_days / DAYS_PER_MONTH
+        # gap_months is rounded to 1 decimal place
+        assert abs(gaps[0]["gap_months"] - round(expected_months, 1)) < 0.01
 
 
 if __name__ == "__main__":

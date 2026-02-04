@@ -52,8 +52,8 @@ function linearRegression(dates, scores, useLog = false) {
     const slope = (n * sumXY - sumX * sumY) / denominator;
     const intercept = (sumY - slope * sumX) / n;
 
-    // Convert slope to per-year
-    const slopePerYear = slope * 365;
+    // Convert slope to per-year (365.25 accounts for leap years, matching Python backend)
+    const slopePerYear = slope * 365.25;
 
     return {
         slope: useLog ? Math.exp(slopePerYear) : slopePerYear, // For log: multiplicative factor per year
@@ -1065,9 +1065,16 @@ function renderChart(data) {
     );
 
     if (unmatchedClosed.length > 0) {
-        // Calculate expected catch-up dates for hover text
-        const ciLowMs = (statistics?.ci_90_low || 0) * 30.5 * 24 * 60 * 60 * 1000;
-        const ciHighMs = (statistics?.ci_90_high || 0) * 30.5 * 24 * 60 * 60 * 1000;
+        // Helper function to add months properly (handles month boundaries correctly)
+        const addMonths = (date, months) => {
+            const result = new Date(date);
+            const wholeMonths = Math.floor(months);
+            const fractionalDays = (months - wholeMonths) * 30.4375;  // Convert fractional month to days
+            result.setMonth(result.getMonth() + wholeMonths);
+            result.setDate(result.getDate() + Math.round(fractionalDays));
+            return result;
+        };
+
         const hasCIData = statistics?.ci_90_low !== undefined && statistics?.ci_90_high !== undefined;
 
         const hoverTexts = unmatchedClosed.map(m => {
@@ -1076,9 +1083,9 @@ function renderChart(data) {
             if (!hasCIData) {
                 return `<b>${name}</b><br>${scoreName}: ${score?.toFixed(1) || 'N/A'}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
             }
-            const releaseDate = new Date(m.date).getTime();
-            const expectedLow = new Date(releaseDate + ciLowMs);
-            const expectedHigh = new Date(releaseDate + ciHighMs);
+            const releaseDate = new Date(m.date);
+            const expectedLow = addMonths(releaseDate, statistics.ci_90_low);
+            const expectedHigh = addMonths(releaseDate, statistics.ci_90_high);
             const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
             return `<b>${name}</b><br>${scoreName}: ${score?.toFixed(1) || 'N/A'}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
         });

@@ -4,7 +4,7 @@ import logging
 import math
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import numpy as np
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Constants
 ECI_SCORES_URL = "https://epoch.ai/data/eci_scores.csv"
 ECI_MATCH_THRESHOLD = 1.0  # ECI points - model is "matched" if within this range
-DAYS_PER_MONTH = 30.5  # Average days per month for gap calculations
+DAYS_PER_MONTH = 365.25 / 12  # 30.4375 - accurate average days per month accounting for leap years
 
 # Import benchmark fetcher for additional benchmarks
 # May fail if epochai package not installed or Airtable credentials not set
@@ -230,7 +230,7 @@ def calculate_trends(df: pd.DataFrame, score_col: str = "eci", use_apr_2024_spli
             "absolute_growth_per_year": round(yearly_absolute_growth, 2),
             "percentage_growth_annualized": round(pct_growth, 1),
             "multiples_per_year": round(multiples_per_year, 2),
-            "doubling_time_years": round(doubling_time_years, 2),
+            "doubling_time_years": round(doubling_time_years, 2) if doubling_time_years is not None else None,
             "start_point": {
                 "date": datetime.fromordinal(int(start_date_ord)).isoformat(),
                 "eci": lin_start_score  # Keep as "eci" for frontend compatibility
@@ -345,7 +345,13 @@ def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float], use
             ]
 
     if not matched_gaps_months or len(matched_gaps_months) < 3:
-        estimated = oldest_unmatched * 1.3
+        # Use 75th percentile of available data if possible, otherwise conservative estimate
+        if matched_gaps_months and len(matched_gaps_months) >= 1:
+            historical_p75 = np.percentile(matched_gaps_months, 75)
+            estimated = max(oldest_unmatched, historical_p75)
+        else:
+            # No historical data - use 50% buffer as conservative estimate
+            estimated = oldest_unmatched * 1.5
         return {
             "estimated_current_gap": round(estimated, 1),
             "min_current_gap": round(float(oldest_unmatched), 1),
@@ -357,7 +363,12 @@ def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float], use
     # Fit log-normal distribution to matched gaps
     matched_positive = [g for g in matched_gaps_months if g > 0]
     if len(matched_positive) < 3:
-        estimated = oldest_unmatched * 1.3
+        # Use 75th percentile of positive data if available
+        if matched_positive:
+            historical_p75 = np.percentile(matched_positive, 75)
+            estimated = max(oldest_unmatched, historical_p75)
+        else:
+            estimated = oldest_unmatched * 1.5
         return {
             "estimated_current_gap": round(estimated, 1),
             "min_current_gap": round(float(oldest_unmatched), 1),
@@ -368,10 +379,12 @@ def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float], use
 
     log_matched = np.log(matched_positive)
     mu_prior = np.mean(log_matched)
-    sigma_prior = np.std(log_matched)
+    sigma_prior = np.std(log_matched, ddof=1)  # Use unbiased estimator (Bessel's correction)
 
-    if sigma_prior == 0:
-        sigma_prior = 0.5
+    if sigma_prior < 0.1:
+        # Very low variance means all historical gaps are nearly identical
+        # Use a small but reasonable sigma based on coefficient of variation ~10%
+        sigma_prior = 0.1  # Corresponds to ~10% CV in log-normal
 
     def expected_given_greater_than(c, mu, sigma):
         """E[X | X > c] for log-normal distribution."""
@@ -542,8 +555,9 @@ def calculate_statistics(
         }
 
     # Use max of minimums to start from the score level where reference models first appear.
+    # Use min of maximums to end at the score level where both types of models exist (avoid censored observations).
     start_score = max(df_open[score_col].min(), df_closed[score_col].min())
-    end_score = max(df_open[score_col].max(), df_closed[score_col].max())
+    end_score = min(df_open[score_col].max(), df_closed[score_col].max())
 
     # Use log-spaced sampling when data spans >10x range (exponential growth)
     score_ratio = end_score / start_score if start_score > 0 else 1
@@ -572,15 +586,18 @@ def calculate_statistics(
                 break
 
         if cur_open_model is None:
-            now = datetime.now()
-            gap = (now - cur_closed_model["date"].to_pydatetime().replace(tzinfo=None)).days / 30.5
+            now = datetime.now(timezone.utc)
+            gap = (now - cur_closed_model["date"].to_pydatetime().replace(tzinfo=timezone.utc)).days / 30.5
             horizontal_gaps.append(gap)
 
     if horizontal_gaps:
         avg_gap = np.mean(horizontal_gaps)
-        std_gap = np.std(horizontal_gaps)
-        ci_low = np.percentile(horizontal_gaps, 5)
-        ci_high = np.percentile(horizontal_gaps, 95)
+        std_gap = np.std(horizontal_gaps, ddof=1)  # Unbiased estimator
+        n = len(horizontal_gaps)
+        # 90% confidence interval on the mean (z = 1.645 for 90% CI)
+        sem = std_gap / np.sqrt(n)  # Standard error of the mean
+        ci_low = avg_gap - 1.645 * sem
+        ci_high = avg_gap + 1.645 * sem
     else:
         avg_gap = std_gap = ci_low = ci_high = 0
 

@@ -21,6 +21,9 @@ from scipy.stats import linregress, norm
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Constants
+DAYS_PER_MONTH = 365.25 / 12  # 30.4375 - accurate average days per month
+
 app = Flask(__name__)
 
 # Data source
@@ -230,7 +233,7 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
 
         if matching_open is not None:
             gap_days = (matching_open["date"] - closed_date).days
-            gap_months = gap_days / 30.5
+            gap_months = gap_days / DAYS_PER_MONTH
 
             gaps.append({
                 "closed_model": closed_row.get("Model", "Unknown"),
@@ -247,7 +250,7 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
             # Unmatched closed model
             now = datetime.now()
             gap_days = (now - closed_date.to_pydatetime().replace(tzinfo=None)).days
-            gap_months = gap_days / 30.5
+            gap_months = gap_days / DAYS_PER_MONTH
 
             gaps.append({
                 "closed_model": closed_row.get("Model", "Unknown"),
@@ -367,7 +370,7 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
         }
     
     start_eci = max(df_open["eci"].min(), df_closed["eci"].min())
-    end_eci = max(df_open["eci"].max(), df_closed["eci"].max())
+    end_eci = min(df_open["eci"].max(), df_closed["eci"].max())  # Use min to avoid censored observations
     
     horizontal_gaps = []
     
@@ -390,7 +393,7 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
                 
             if row["eci"] >= cur_eci - 1:
                 cur_open_model = row
-                gap = (cur_open_model["date"] - cur_closed_model["date"]).days / 30.5
+                gap = (cur_open_model["date"] - cur_closed_model["date"]).days / DAYS_PER_MONTH
                 horizontal_gaps.append(gap)
                 break
             else:
@@ -401,15 +404,18 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
             now = datetime.now()
             # Calculate gap from closed model release to now
             # Only count if "now" is after release date (should be always true for valid data)
-            gap = (now - cur_closed_model["date"].to_pydatetime().replace(tzinfo=None)).days / 30.5
+            gap = (now - cur_closed_model["date"].to_pydatetime().replace(tzinfo=None)).days / DAYS_PER_MONTH
             horizontal_gaps.append(gap)
     
     # Calculate statistics from sampled gaps
     if horizontal_gaps:
         avg_gap = np.mean(horizontal_gaps)
-        std_gap = np.std(horizontal_gaps)
-        ci_low = np.percentile(horizontal_gaps, 5)
-        ci_high = np.percentile(horizontal_gaps, 95)
+        std_gap = np.std(horizontal_gaps, ddof=1)  # Unbiased estimator
+        n = len(horizontal_gaps)
+        # 90% confidence interval on the mean (z = 1.645 for 90% CI)
+        sem = std_gap / np.sqrt(n)  # Standard error of the mean
+        ci_low = avg_gap - 1.645 * sem
+        ci_high = avg_gap + 1.645 * sem
     else:
         avg_gap = std_gap = ci_low = ci_high = 0
 
